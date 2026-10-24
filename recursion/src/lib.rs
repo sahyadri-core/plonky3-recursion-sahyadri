@@ -1,6 +1,7 @@
 //! Recursive proof verification for Plonky3 STARKs.
 
-#![no_std]
+#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(rust_2018_idioms)]
 
 extern crate alloc;
 #[cfg(test)]
@@ -73,3 +74,7 @@ pub use verifier::{
     InputResourceUsage, ObservableCommitment, VerificationError, VerifierLimits,
     verify_batch_circuit, verify_p3_uni_proof_circuit,
 };
+pub mod air;
+
+#[cfg(feature = "frost-gkr")]
+pub mod frost_gkr;

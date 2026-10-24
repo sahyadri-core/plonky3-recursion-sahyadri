@@ -798,8 +798,6 @@ dependencies = [
 [[package]]
 name = "p3-blake3-air"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88bfaf8f1723c78ba5bc4d2cb5d294639abba7504f046a5ca3cdcff12894c0af"
 dependencies = [
  "itertools 0.15.0",
  "p3-air",
@@ -1337,6 +1335,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-poseidon2b"
+version = "0.1.0"
+dependencies = [
+ "p3-air",
+ "p3-binary-field",
+ "p3-field",
+ "p3-matrix",
+]
+
+[[package]]
 name = "p3-recursion"
 version = "0.1.0"
 dependencies = [
@@ -1352,6 +1360,7 @@ dependencies = [
  "p3-binary-field",
  "p3-binary-pcs",
  "p3-blake3",
+ "p3-blake3-air",
  "p3-bus",
  "p3-challenger",
  "p3-circuit",
@@ -1373,6 +1382,7 @@ dependencies = [
  "p3-poseidon2",
  "p3-poseidon2-air",
  "p3-poseidon2-circuit-air",
+ "p3-poseidon2b",
  "p3-sumcheck",
  "p3-symmetric",
  "p3-test-utils",

@@ -14,6 +14,7 @@ autotests = false
 
 [dependencies]
 p3-maybe-rayon.workspace = true
+p3-poseidon2b = { workspace = true }
 
 # Other dependencies
 hashbrown.workspace = true
@@ -71,6 +72,7 @@ p3-matrix.workspace = true
 p3-poseidon2.workspace = true
 p3-test-utils.workspace = true
 p3-util.workspace = true
+p3-blake3-air = "0.8.0"
 proptest.workspace = true
 rand.workspace = true
 rayon.workspace = true
@@ -78,6 +80,8 @@ tracing-forest = { workspace = true, features = ["smallvec"] }
 tracing-subscriber = { workspace = true, features = ["std", "env-filter"] }
 
 [features]
+std = []
+frost-gkr = []
 parallel = [
     "p3-maybe-rayon/parallel",
     "p3-circuit/parallel",

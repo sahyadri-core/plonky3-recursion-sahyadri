@@ -44,3 +44,10 @@ CLAUDE.md
 # Superpowers subagent-driven-development workspaces
 .worktrees/
 .superpowers/
+# Reference repos (local dev only)
+reference-frost-gkr/
+reference-poseidon2b/
+
+# Vendored workflow files (trigger PAT workflow-scope check)
+.github/workflows/
+vendor/*/.github/

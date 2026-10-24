@@ -1,0 +1,11 @@
+[package]
+name = "p3-poseidon2b"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+p3-binary-field = "0.8.0"
+p3-field = "0.8.0"
+p3-air = "0.8.0"
+p3-matrix = "0.8.0"
