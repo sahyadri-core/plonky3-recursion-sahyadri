@@ -360,6 +360,7 @@ macro_rules! whir_impl {
 
 whir_impl!(BabyBearD4Poseidon2WhirConfig, BabyBear, BinomialExtensionField<BabyBear, 4>, FieldEncoding::u32(), baby_bear_d4_poseidon2_whir);
 whir_impl!(KoalaBearD4Poseidon2WhirConfig, KoalaBear, BinomialExtensionField<KoalaBear, 4>, FieldEncoding::u32(), koala_bear_d4_poseidon2_whir);
+whir_impl!(GoldilocksD2Poseidon2WhirConfig, Goldilocks, BinomialExtensionField<Goldilocks, 2>, FieldEncoding::u64(), goldilocks_d2_poseidon2_whir);
 
 pub(crate) fn encode_verifier<SC>(
     verifier: &CircuitVerifier<SC>,
@@ -716,6 +717,7 @@ pub(crate) fn decode_portable_verifier(
         }
         SuiteIdV1::BabyBearD4Poseidon2Whir => decode!(BabyBearD4Poseidon2WhirConfig),
         SuiteIdV1::KoalaBearD4Poseidon2Whir => decode!(KoalaBearD4Poseidon2WhirConfig),
+        SuiteIdV1::GoldilocksD2Poseidon2Whir => decode!(GoldilocksD2Poseidon2WhirConfig),
     }
 }
 

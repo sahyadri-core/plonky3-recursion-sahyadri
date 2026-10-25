@@ -21,6 +21,11 @@ use crate::pcs::whir::uni::{
 use crate::recursion::RecursionInput;
 use crate::traits::RecursiveAir;
 use crate::{Poseidon2Config, VerificationError};
+use p3_goldilocks::{Goldilocks, Poseidon2Goldilocks};
+use p3_poseidon2_circuit_air::GoldilocksD2Width16;
+use crate::builtin_config::GoldilocksD2Poseidon2WhirConfig;
+use crate::builtin_config::fixed_goldilocks_poseidon2_16;
+
 
 macro_rules! whir_recursion_config {
     ($config:ty, $field:ty, $challenge:ty, $perm:ty, $air:ty, $perm_factory:path, $poseidon:expr) => {
@@ -129,3 +134,14 @@ whir_recursion_config!(
     default_koalabear_poseidon2_16,
     Poseidon2Config::KOALA_BEAR_D4_W16
 );
+
+whir_recursion_config!(
+    GoldilocksD2Poseidon2WhirConfig,
+    Goldilocks,
+    BinomialExtensionField<Goldilocks, 2>,
+    Poseidon2Goldilocks<16>,
+    GoldilocksD2Width16,
+    fixed_goldilocks_poseidon2_16,
+    Poseidon2Config::GOLDILOCKS_D2_W16
+);
+

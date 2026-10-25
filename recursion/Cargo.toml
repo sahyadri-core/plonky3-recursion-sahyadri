@@ -13,6 +13,7 @@ categories.workspace = true
 autotests = false
 
 [dependencies]
+p3-blake3-air = "0.8.0"
 p3-maybe-rayon.workspace = true
 p3-poseidon2b = { workspace = true }
 
@@ -131,3 +132,21 @@ path = "tests/whir_quintic.rs"
 
 [lints]
 workspace = true
+
+[[test]]
+name = "day4_probe"
+path = "tests/day4_probe.rs"
+
+[[test]]
+name = "day4_single_air_proof"
+path = "tests/day4_single_air_proof.rs"
+
+[[test]]
+name = "day4_three_air_proofs"
+path = "tests/day4_three_air_proofs.rs"
+[[test]]
+name = "day5_multi_air_whir"
+path = "tests/day5_multi_air_whir.rs"
+[[test]]
+name = "day6_chain_scale"
+path = "tests/day6_chain_scale.rs"

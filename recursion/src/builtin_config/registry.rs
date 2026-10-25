@@ -39,10 +39,11 @@ pub enum SuiteIdV1 {
     KoalaBearD4Poseidon2SaltedFri = 0x0401,
     BabyBearD4Poseidon2Whir = 0x0501,
     KoalaBearD4Poseidon2Whir = 0x0502,
+    GoldilocksD2Poseidon2Whir = 0x0503,
 }
 
 impl SuiteIdV1 {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::BabyBearD4Poseidon2BinaryFri,
         Self::BabyBearD4Poseidon1BinaryFri,
         Self::KoalaBearD4Poseidon2BinaryFri,
@@ -64,6 +65,7 @@ impl SuiteIdV1 {
         Self::KoalaBearD4Poseidon2SaltedFri,
         Self::BabyBearD4Poseidon2Whir,
         Self::KoalaBearD4Poseidon2Whir,
+        Self::GoldilocksD2Poseidon2Whir,
     ];
 
     pub const fn as_u16(self) -> u16 {
@@ -93,6 +95,7 @@ impl SuiteIdV1 {
             0x0401 => Self::KoalaBearD4Poseidon2SaltedFri,
             0x0501 => Self::BabyBearD4Poseidon2Whir,
             0x0502 => Self::KoalaBearD4Poseidon2Whir,
+            0x0503 => Self::GoldilocksD2Poseidon2Whir,
             _ => return Err(BuiltinConfigError::UnsupportedSuite(raw)),
         };
         Ok(suite)
@@ -224,6 +227,7 @@ impl SuiteIdV1 {
             }
             Self::BabyBearD4Poseidon2Whir => (BabyBear, 4, Poseidon2, 16, 8, 16, 8, 2, Whir, 0),
             Self::KoalaBearD4Poseidon2Whir => (KoalaBear, 4, Poseidon2, 16, 8, 16, 8, 2, Whir, 0),
+            Self::GoldilocksD2Poseidon2Whir => (Goldilocks, 2, Poseidon2, 16, 8, 16, 8, 2, Whir, 0),
         };
         SuiteSpecV1 {
             field,
@@ -261,7 +265,8 @@ impl SuiteIdV1 {
             Self::KoalaBearD5Poseidon1BinaryFri => PermConfig::poseidon1(P1::KOALA_BEAR_D1_W16),
             Self::BabyBearD4Poseidon2QuaternaryFri => PermConfig::poseidon2(P2::BABY_BEAR_D4_W32),
             Self::KoalaBearD4Poseidon2QuaternaryFri => PermConfig::poseidon2(P2::KOALA_BEAR_D4_W32),
-            Self::GoldilocksD2Poseidon2QuaternaryFri => {
+            Self::GoldilocksD2Poseidon2QuaternaryFri
+            | Self::GoldilocksD2Poseidon2Whir => {
                 PermConfig::poseidon2(P2::GOLDILOCKS_D2_W16)
             }
             Self::KoalaBearD5Poseidon2QuaternaryFri => PermConfig::poseidon2(P2::KOALA_BEAR_D1_W32),
@@ -748,7 +753,13 @@ impl WhirConfigV1 {
             )
             .and_then(|params| params.with_rate_policy(self.rate_policy()))
             .map(|_| ()),
-            FieldFamilyV1::Goldilocks => return Err(BuiltinConfigError::InvalidWhirConfiguration),
+            FieldFamilyV1::Goldilocks => WhirUniVerifierParams::<Goldilocks>::new(
+                protocol,
+                VariableOrder::Prefix,
+                self.suite.mmcs_permutation(),
+            )
+            .and_then(|params| params.with_rate_policy(self.rate_policy()))
+            .map(|_| ()),
         };
         valid.map_err(|_| BuiltinConfigError::InvalidWhirConfiguration)?;
         Ok(())

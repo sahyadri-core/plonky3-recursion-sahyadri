@@ -6,7 +6,7 @@
 
 pub(crate) mod fri;
 mod registry;
-pub(crate) mod whir;
+pub mod whir;
 
 pub use fri::*;
 pub use registry::{

@@ -13,6 +13,9 @@ use p3_uni_stark::{StarkConfig, StarkGenericConfig};
 use super::{BuiltinConfigError, SuiteIdV1, WhirConfigV1};
 use crate::pcs::whir::uni::{WhirUniPcs, WhirUniVerifierParams};
 use crate::verifier::VerifierLimits;
+use crate::builtin_config::fixed_goldilocks_poseidon2_16;
+use p3_goldilocks::Poseidon2Goldilocks;
+use p3_goldilocks::Goldilocks;
 
 mod recursion;
 
@@ -163,4 +166,14 @@ whir_factory!(
     Poseidon2KoalaBear<16>,
     SuiteIdV1::KoalaBearD4Poseidon2Whir,
     default_koalabear_poseidon2_16()
+);
+
+whir_factory!(
+    GoldilocksD2Poseidon2WhirConfig,
+    goldilocks_d2_poseidon2_whir,
+    Goldilocks,
+    BinomialExtensionField<Goldilocks, 2>,
+    Poseidon2Goldilocks<16>,
+    SuiteIdV1::GoldilocksD2Poseidon2Whir,
+    fixed_goldilocks_poseidon2_16()
 );

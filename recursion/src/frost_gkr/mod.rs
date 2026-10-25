@@ -356,3 +356,5 @@ mod correctness_tests {
         );
     }
 }
+pub mod blake3_multi_stark;
+pub mod blake3_bridge;
