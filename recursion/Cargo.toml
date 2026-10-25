@@ -182,3 +182,11 @@ path = "tests/pathc_probe.rs"
 [[test]]
 name = "phase3e_trace_builder"
 path = "tests/phase3e_trace_builder.rs"
+
+[[test]]
+name = "phase3e_multi_stark_proof"
+path = "tests/phase3e_multi_stark_proof.rs"
+
+[[test]]
+name = "phase3e_simple"
+path = "tests/phase3e_simple.rs"
