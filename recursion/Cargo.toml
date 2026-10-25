@@ -154,3 +154,11 @@ path = "tests/day6_chain_scale.rs"
 [[test]]
 name = "blake3_bridge_test"
 path = "tests/blake3_bridge_test.rs"
+
+[[test]]
+name = "blake3_goldilocks_bridge"
+path = "tests/blake3_goldilocks_bridge.rs"
+
+[[test]]
+name = "fri_verifier_multi_stark"
+path = "tests/fri_verifier_multi_stark.rs"
