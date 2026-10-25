@@ -61,6 +61,7 @@ tracing.workspace = true
 unroll.workspace = true
 
 [dev-dependencies]
+blake3 = "1.5"
 clap.workspace = true
 libmimalloc-sys.workspace = true
 mimalloc.workspace = true
@@ -173,3 +174,11 @@ path = "tests/fri_verifier_from_real_proof.rs"
 
 [dependencies.sahyadri-fri-binius]
 path = "../../sahyadri-final/sahyadri/crates/sahyadri-fri-binius"
+
+[[test]]
+name = "pathc_probe"
+path = "tests/pathc_probe.rs"
+
+[[test]]
+name = "phase3e_trace_builder"
+path = "tests/phase3e_trace_builder.rs"
