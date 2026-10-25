@@ -357,4 +357,5 @@ mod correctness_tests {
     }
 }
 pub mod blake3_multi_stark;
+pub mod poseidon2b_bus_air;
 pub mod blake3_bridge;

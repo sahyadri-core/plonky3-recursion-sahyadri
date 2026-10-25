@@ -162,3 +162,14 @@ path = "tests/blake3_goldilocks_bridge.rs"
 [[test]]
 name = "fri_verifier_multi_stark"
 path = "tests/fri_verifier_multi_stark.rs"
+
+[[test]]
+name = "fri_verifier_v2_scale"
+path = "tests/fri_verifier_v2_scale.rs"
+
+[[test]]
+name = "fri_verifier_from_real_proof"
+path = "tests/fri_verifier_from_real_proof.rs"
+
+[dependencies.sahyadri-fri-binius]
+path = "../../sahyadri-final/sahyadri/crates/sahyadri-fri-binius"
