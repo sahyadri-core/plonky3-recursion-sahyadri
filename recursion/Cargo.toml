@@ -150,3 +150,7 @@ path = "tests/day5_multi_air_whir.rs"
 [[test]]
 name = "day6_chain_scale"
 path = "tests/day6_chain_scale.rs"
+
+[[test]]
+name = "blake3_bridge_test"
+path = "tests/blake3_bridge_test.rs"
