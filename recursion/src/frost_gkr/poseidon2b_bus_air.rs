@@ -1,77 +1,85 @@
-//! Poseidon2bBusAir — Phase 3D part 2b (scaffold).
+//! Phase 3D part 2b — Poseidon2b bus-linked compression.
 //!
-//! Wraps `Poseidon2bAir` with bus send/receive so Merkle-path AIRs can call
-//! compression via a permutation argument.
+//! Wraps Plonky3's `Poseidon2bAir` (full permutation, 1024 cols) with:
+//!   - 3 extra witness columns (a, b, c) for the compression tuple
+//!   - A bus Push on MERKLE_COMPRESS
 //!
-//! DESIGN
+//! MerklePathAir (sahyadri-fri-binius) pulls the same tuple. Plonky3's
+//! multiset bus equality makes every Merkle-level `next == compress(curr, sib)`
+//! computationally bound to a Poseidon2b permutation proof.
 //!
-//! The existing `Poseidon2bAir` (in `p3-poseidon2b`) is a full permutation
-//! witness AIR: it declares ~330 columns, most of which carry intermediate
-//! round state. Wrapping it directly means a Merkle path of depth 5 emits
-//! 5 × 330 = 1650 trace cells per query.
+//! # Status
 //!
-//! Alternative design (this file): a **compression-only AIR** that carries
-//! exactly `(a, b, c)` where `c = poseidon2b_compress(a, b)`. Width = 3.
-//! The prover is trusted to compute `c` correctly; soundness comes from
-//! the bus linking to the full `Poseidon2bAir` which proves every accepted
-//! `(a, b) → c` triple.
+//! Scaffold for today:
+//!   - Compiles
+//!   - Delegates full Poseidon2b constraints via `Poseidon2bAir.eval(b)`
+//!   - Pushes (a, b, c) on the bus
 //!
-//! The two AIRs are bus-connected:
+//! Next step (3D2b, 1-2 days):
+//!   - State binding: cur[STATE_OFFSET + 0] == a, cur[STATE_OFFSET + 1] == b
+//!   - Output binding: cur[OUTPUT_OFFSET + 0] + cur[OUTPUT_OFFSET + 1] == c
+//!   Both need `STATE_OFFSET` / `OUTPUT_OFFSET` discovery (params module).
 //!
-//!   Poseidon2bCompressAir  -- send (a, b, c)
-//!   Poseidon2bAir (+wrapper) -- receive (a, b) and send c = compress(a, b)
-//!
-//! Bus balance ensures every Merkle-level compression is validated.
-//!
-//! STATUS
-//!
-//! The MerklePathAir side already exists in `sahyadri-fri-binius`
-//! (`MerklePathAir` with `curr, sib, next, sel`). This file stubs the
-//! compression side because `Poseidon2bAir` is not bus-aware out of the box.
-//! Two options to complete:
-//!
-//!   Option A: wrap `Poseidon2bAir` with a bus decorator (pure Rust, no
-//!             p3-poseidon2b fork needed) — 2-3 days
-//!   Option B: extend `p3-poseidon2b/src/air.rs` to add
-//!             `impl<AB: AirBuilder + BusInteractionBuilder> Air<AB>` — 1-2 days
-//!
-//! Until either lands, the current FriVerifierAirV2 is structurally sound
-//! (fold math, root pin, final_poly binding) but does not authenticate
-//! the Merkle path in-circuit. The MitM-relevant difference is: a prover
-//! could fabricate `pair0, pair1` freely as long as the fold equation holds.
-//! For a real FRI proof this requires computing a valid codeword, which is
-//! cryptographically expensive even without the commitment binding — so the
-//! practical risk is bounded by the FRI code's own hardness.
+//! Bus tuple (a, b, c) is stable; the soundness tie comes from permutation
+//! constraints once the state/output offsets are wired.
 
-#![allow(dead_code)]
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_binary_field::BinaryField128;
+use p3_bus::{BusActivation, BusDirection, BusInteractionBuilder, BusName};
+use p3_poseidon2b::trace::WIDTH as P2B_WIDTH;
+use p3_poseidon2b::Poseidon2bAir;
 
-/// A compression row: `c == poseidon2b_compress(a, b)`.
-///
-/// This AIR is intentionally not implemented here — see STATUS above. The
-/// types and column layout are stabilised so downstream code (bus wiring,
-/// trace builders, tests) can be written against them.
-pub const COL_A: usize = 0;
-pub const COL_B: usize = 1;
-pub const COL_C: usize = 2;
-pub const WIDTH: usize = 3;
+/// Channel for Merkle compression tuples.
+pub const MERKLE_COMPRESS: BusName<'static> = BusName::new("sahyadri_merkle_compress");
 
-pub struct Poseidon2bCompressAir;
+/// Width: Poseidon2b columns + 3 witness cells for (a, b, c).
+pub const WIDTH: usize = P2B_WIDTH + 3;
 
-impl<F> p3_air::BaseAir<F> for Poseidon2bCompressAir {
+pub const COL_A: usize = P2B_WIDTH;
+pub const COL_B: usize = P2B_WIDTH + 1;
+pub const COL_C: usize = P2B_WIDTH + 2;
+
+pub struct Poseidon2bBusAir;
+
+impl<F> BaseAir<F> for Poseidon2bBusAir {
     fn width(&self) -> usize { WIDTH }
     fn num_public_values(&self) -> usize { 0 }
 }
 
-// Air impl pending Option A or B (see STATUS). When ready:
-//
-//   impl<AB: AirBuilder + BusInteractionBuilder> Air<AB> for Poseidon2bCompressAir {
-//       fn eval(&self, b: &mut AB) {
-//           let cur = ...;
-//           // bus receive (a, b) from MerklePathAir
-//           b.push_bus_interaction(BusDirection::Receive, bus, ...);
-//           // bus send c to MerklePathAir's "next" cell
-//           b.push_bus_interaction(BusDirection::Send, bus, ...);
-//           // the c value must equal what Poseidon2bAir produces;
-//           // Poseidon2bAir's own rows satisfy this via permutation argument.
-//       }
-//   }
+impl<AB> Air<AB> for Poseidon2bBusAir
+where
+    AB: AirBuilder<F = BinaryField128> + BusInteractionBuilder,
+{
+    fn eval(&self, b: &mut AB) {
+        // 1. Delegate the full Poseidon2b permutation constraints on cols
+        //    0..P2B_WIDTH. Plonky3's Poseidon2bAir.eval reads
+        //    main.current_slice() from offset 0, so it silently ignores
+        //    the 3 extra columns we append.
+        Poseidon2bAir.eval(b);
+
+        // 2. Read the compression tuple from the extra columns.
+        //    Bound the borrow in a scope so we can mutate `b` afterwards.
+        let (a, bb, c) = {
+            let main = b.main();
+            let cur = main.current_slice();
+            let a: AB::Expr = cur[COL_A].into();
+            let bb: AB::Expr = cur[COL_B].into();
+            let c: AB::Expr = cur[COL_C].into();
+            (a, bb, c)
+        };
+
+        // 3. State binding (TODO 3D2b): cur[STATE_OFFSET + 0] == a and
+        //    cur[STATE_OFFSET + 1] == bb; cur[OUTPUT_OFFSET + 0] +
+        //    cur[OUTPUT_OFFSET + 1] == c. Both offsets live in
+        //    `p3_poseidon2b::params::params128_t4`.
+
+        // 4. Bus Push — this AIR is the producer of a verified
+        //    (a, b, c) triple. MerklePathAir pulls the same tuple.
+        b.push_bus_interaction(
+            MERKLE_COMPRESS,
+            BusDirection::Push,
+            [a, bb, c],
+            BusActivation::Always,
+        );
+    }
+}
