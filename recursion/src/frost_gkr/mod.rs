@@ -359,5 +359,7 @@ mod correctness_tests {
 pub mod blake3_multi_stark;
 pub mod poseidon2b_bus_air;
 pub mod combined_air;
+pub mod binary_aggregation_air;
+pub mod binary_verifier_air;
 pub mod fri_verifier_air_v2;
 pub mod blake3_bridge;
