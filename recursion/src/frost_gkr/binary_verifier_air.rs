@@ -135,11 +135,14 @@ impl<AB: AirBuilder<F = BinaryField128> + BusInteractionBuilder> Air<AB>
             let sib: AB::Expr = cur[COL_MERKLE_SIB_BASE + level].into();
             let parent: AB::Expr = cur[COL_MERKLE_PARENT_BASE + level].into();
 
+            // Fire only on last row so a 4-row replicated consumer trace
+            // contributes exactly 4 pulls (one per level), not 16.
+            let active = b.is_last_row();
             b.push_bus_interaction(
                 MERKLE_COMPRESS,
                 BusDirection::Pull,
                 [curr, sib, parent],
-                BusActivation::Always,
+                BusActivation::Boolean(active),
             );
         }
     }

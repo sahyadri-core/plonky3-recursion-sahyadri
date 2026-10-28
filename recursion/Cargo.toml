@@ -202,3 +202,7 @@ path = "tests/phase3d2d_combined.rs"
 [[test]]
 name = "phase3f_real_scale"
 path = "tests/phase3f_real_scale.rs"
+
+[[test]]
+name = "phase_c1_5_combined"
+path = "tests/phase_c1_5_combined.rs"
