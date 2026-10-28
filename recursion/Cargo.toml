@@ -198,3 +198,7 @@ path = "tests/phase3e_verify.rs"
 [[test]]
 name = "phase3d2d_combined"
 path = "tests/phase3d2d_combined.rs"
+
+[[test]]
+name = "phase3f_real_scale"
+path = "tests/phase3f_real_scale.rs"
