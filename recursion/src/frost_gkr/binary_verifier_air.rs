@@ -1,37 +1,33 @@
-//! BinaryVerifierAir — Phase C1.2 (fold) + C1.3 (Merkle bus Pull).
+//! BinaryVerifierAir — Phase C1.4 (depth-4 Merkle) + C1.5 groundwork.
 //!
-//! # Column layout (per query-round row, 12 cols)
+//! # Column layout (WIDTH = 18)
 //!
-//! | Col | Name          | Purpose                                    |
-//! |-----|---------------|--------------------------------------------|
-//! | 0   | pair0         | codeword eval at index i_0 (Merkle leaf)   |
-//! | 1   | pair1         | sibling eval (FRI pair)                    |
-//! | 2   | alpha         | FRI fold challenge                         |
-//! | 3   | next          | fold result or final_poly[i_final]         |
-//! | 4   | sel           | index parity bit (0/1)                     |
-//! | 5   | is_last       | boolean, marks last round                  |
-//! | 6-9 | s0..s3        | final-poly one-hot selectors (last row)    |
-//! | 10  | merkle_sib    | 1 Merkle sibling (leaf-parent level)       |
-//! | 11  | merkle_parent | expected parent hash                       |
+//! | Col   | Name                | Purpose                                |
+//! |-------|---------------------|----------------------------------------|
+//! | 0     | pair0               | FRI leaf / fold current                |
+//! | 1     | pair1               | FRI sibling for fold                   |
+//! | 2     | alpha               | FRI fold challenge                     |
+//! | 3     | next                | fold result / final_poly[i_final]      |
+//! | 4     | sel                 | index parity bit                       |
+//! | 5     | is_last             | boolean, marks last round              |
+//! | 6-9   | s0..s3              | final-poly one-hot selectors           |
+//! | 10-13 | merkle_sib[0..4]    | 4 Merkle siblings (depth 4)            |
+//! | 14-17 | merkle_parent[0..4] | 4 intermediate parents (parent[3]=root)|
 //!
-//! # C1.2 constraints (always on)
+//! # Bus Pulls (C1.3 extension for C1.4)
 //!
-//! - Booleanity: sel, is_last, s0..s3 ∈ {0,1}
-//! - Pairwise disjointness on s0..s3
-//! - Last row: exactly one selector active
-//! - Fold: next == pair0 + sel·(p0+p1) + α·(p1 + sel·(p0+p1))
-//! - Last row: next == Σ sᵢ · final_poly[i]
+//! `BinaryVerifierBusAir` emits 4 Pull tuples on MERKLE_COMPRESS:
+//!   (pair0,          sib[0], parent[0])
+//!   (parent[0],      sib[1], parent[1])
+//!   (parent[1],      sib[2], parent[2])
+//!   (parent[2],      sib[3], parent[3])  ← parent[3] == root
 //!
-//! # C1.3 (bus wrapper only)
-//!
-//! `BinaryVerifierBusAir` adds Bus Pull `(pair0, merkle_sib, merkle_parent)`
-//! on `MERKLE_COMPRESS`. Consumer pairs with `Poseidon2bBusAir` producer
-//! (3D2b). Bus balance is enforced at MultiStark prove time (see 3D2d).
+//! Pairs with 4 `Poseidon2bBusAir` producers (3D2b) in the same MultiStark.
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_binary_field::BinaryField128;
-use p3_field::PrimeCharacteristicRing;
 use p3_bus::{BusActivation, BusDirection, BusInteractionBuilder, BusName};
+use p3_field::PrimeCharacteristicRing;
 
 pub const MERKLE_COMPRESS: BusName<'static> = BusName::new("sahyadri_merkle_compress");
 
@@ -45,9 +41,10 @@ pub const COL_S0: usize = 6;
 pub const COL_S1: usize = 7;
 pub const COL_S2: usize = 8;
 pub const COL_S3: usize = 9;
-pub const COL_MERKLE_SIB: usize = 10;
-pub const COL_MERKLE_PARENT: usize = 11;
-pub const WIDTH: usize = 12;
+pub const COL_MERKLE_SIB_BASE: usize = 10;
+pub const COL_MERKLE_PARENT_BASE: usize = 14;
+pub const MERKLE_DEPTH: usize = 4;
+pub const WIDTH: usize = COL_MERKLE_PARENT_BASE + MERKLE_DEPTH; // 18
 pub const FINAL_POLY_LEN: usize = 4;
 pub const NUM_PUBLIC: usize = FINAL_POLY_LEN;
 
@@ -58,7 +55,6 @@ impl<F> BaseAir<F> for BinaryVerifierAir {
     fn num_public_values(&self) -> usize { NUM_PUBLIC }
 }
 
-/// C1.2 constraints only (no bus). Standalone, testable via check_constraints.
 impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for BinaryVerifierAir {
     fn eval(&self, b: &mut AB) {
         let main = b.main();
@@ -77,23 +73,28 @@ impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for BinaryVerifierAir {
         ];
         let one = AB::F::ONE;
 
+        // Booleanity
         for v in [&sel, &is_last, &s[0], &s[1], &s[2], &s[3]] {
             let sq = v.clone() * v.clone();
             b.assert_eq(sq + v.clone(), AB::F::ZERO);
         }
+        // Pairwise disjointness
         for i in 0..FINAL_POLY_LEN {
             for j in (i + 1)..FINAL_POLY_LEN {
                 b.assert_eq(s[i].clone() * s[j].clone(), AB::F::ZERO);
             }
         }
+        // Last row must select exactly one final_poly cell
         let selector_sum = s[0].clone() + s[1].clone() + s[2].clone() + s[3].clone();
         b.assert_eq(is_last.clone() * (selector_sum + one), AB::F::ZERO);
 
+        // Fold constraint
         let x = pair0.clone() + pair1.clone();
         let y = sel * x;
         let z = alpha * (pair1 + y.clone());
         b.assert_eq(next.clone(), pair0 + y + z);
 
+        // Final-poly binding on last row
         let public = b.public_values();
         let fp: [AB::Expr; FINAL_POLY_LEN] = [
             public[0].into(), public[1].into(),
@@ -107,11 +108,7 @@ impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for BinaryVerifierAir {
     }
 }
 
-/// C1.3 — wraps `BinaryVerifierAir` with bus Pull on MERKLE_COMPRESS.
-///
-/// Consumer side of the (pair0, sib, parent) tuple; producer is
-/// `Poseidon2bBusAir` (3D2b). Pairs with `Poseidon2bBusAir` in the same
-/// MultiStark — full bus balance check happens at prove time (3D2d pattern).
+/// C1.3+C1.4 bus wrapper — 4 Pull tuples per row.
 pub struct BinaryVerifierBusAir;
 
 impl<F> BaseAir<F> for BinaryVerifierBusAir {
@@ -127,16 +124,24 @@ impl<AB: AirBuilder<F = BinaryField128> + BusInteractionBuilder> Air<AB>
 
         let main = b.main();
         let cur = main.current_slice();
-        let pair0: AB::Expr = cur[COL_PAIR0].into();
-        let sib: AB::Expr = cur[COL_MERKLE_SIB].into();
-        let parent: AB::Expr = cur[COL_MERKLE_PARENT].into();
+        let leaf: AB::Expr = cur[COL_PAIR0].into();
 
-        b.push_bus_interaction(
-            MERKLE_COMPRESS,
-            BusDirection::Pull,
-            [pair0, sib, parent],
-            BusActivation::Always,
-        );
+        for level in 0..MERKLE_DEPTH {
+            let curr: AB::Expr = if level == 0 {
+                leaf.clone()
+            } else {
+                AB::Expr::from(cur[COL_MERKLE_PARENT_BASE + level - 1])
+            };
+            let sib: AB::Expr = cur[COL_MERKLE_SIB_BASE + level].into();
+            let parent: AB::Expr = cur[COL_MERKLE_PARENT_BASE + level].into();
+
+            b.push_bus_interaction(
+                MERKLE_COMPRESS,
+                BusDirection::Pull,
+                [curr, sib, parent],
+                BusActivation::Always,
+            );
+        }
     }
 }
 
@@ -144,7 +149,6 @@ impl<AB: AirBuilder<F = BinaryField128> + BusInteractionBuilder> Air<AB>
 mod tests {
     use super::*;
     use p3_air::check_constraints;
-    use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
 
     type F = BinaryField128;
@@ -156,7 +160,7 @@ mod tests {
         let p1 = blk(pair1);
         let a = blk(alpha);
         let x = p0 + p1;
-        let y = x;  // sel = 1
+        let y = x; // sel = 1
         let z = a * (p1 + y);
         let folded = p0 + y + z;
         let mut row = [F::ZERO; WIDTH];
@@ -166,17 +170,20 @@ mod tests {
         row[COL_NEXT] = folded;
         row[COL_SEL] = blk(1);
         row[COL_IS_LAST] = F::ZERO;
-        row[COL_MERKLE_SIB] = blk(0xdead);
-        row[COL_MERKLE_PARENT] = blk(0xbeef);
+        for i in 0..MERKLE_DEPTH {
+            row[COL_MERKLE_SIB_BASE + i] = blk(0x1000 + i as u128);
+            row[COL_MERKLE_PARENT_BASE + i] = blk(0x2000 + i as u128);
+        }
         row
     }
 
     #[test]
     fn layout_matches_constants() {
-        assert_eq!(WIDTH, 12);
+        assert_eq!(WIDTH, 18);
         assert_eq!(NUM_PUBLIC, 4);
-        assert_eq!(COL_MERKLE_SIB, 10);
-        assert_eq!(COL_MERKLE_PARENT, 11);
+        assert_eq!(COL_MERKLE_SIB_BASE, 10);
+        assert_eq!(COL_MERKLE_PARENT_BASE, 14);
+        assert_eq!(MERKLE_DEPTH, 4);
     }
 
     #[test]
@@ -191,7 +198,7 @@ mod tests {
     fn tampered_alpha_rejected() {
         let air = BinaryVerifierAir;
         let mut row = valid_row(10, 20, 30);
-        row[COL_ALPHA] = blk(31); // next unchanged → fold fails
+        row[COL_ALPHA] = blk(31);
         let trace = RowMajorMatrix::new(row.to_vec(), WIDTH);
         let public = vec![F::ZERO; FINAL_POLY_LEN];
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -204,7 +211,7 @@ mod tests {
     fn tampered_state_rejected() {
         let air = BinaryVerifierAir;
         let mut row = valid_row(10, 20, 30);
-        row[COL_PAIR0] = blk(11); // next now stale
+        row[COL_PAIR0] = blk(11);
         let trace = RowMajorMatrix::new(row.to_vec(), WIDTH);
         let public = vec![F::ZERO; FINAL_POLY_LEN];
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -214,11 +221,11 @@ mod tests {
     }
 
     #[test]
-    fn bus_wrapper_constructible() {
-        // C1.3: BinaryVerifierBusAir implements Air + BusInteractionBuilder.
-        // Full bus balance check is deferred to C1.5 integration (needs
-        // combined MultiStark with Poseidon2bBusAir producer, like 3D2d).
+    fn bus_wrapper_constructible_4_pulls() {
+        // 4 Pull tuples per row, MERKLE_COMPRESS channel.
+        // Full bus balance check is in C1.5 combined MultiStark.
         let _ = BinaryVerifierBusAir;
         let _ = MERKLE_COMPRESS;
+        assert_eq!(MERKLE_DEPTH, 4);
     }
 }
