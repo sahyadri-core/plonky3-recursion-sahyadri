@@ -1825,6 +1825,7 @@ dependencies = [
  "blake3",
  "p3-air",
  "p3-binary-field",
+ "p3-bus",
  "p3-field",
  "p3-matrix",
  "p3-poseidon2b",

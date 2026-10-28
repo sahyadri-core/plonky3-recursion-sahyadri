@@ -194,3 +194,7 @@ path = "tests/phase3e_simple.rs"
 [[test]]
 name = "phase3e_verify"
 path = "tests/phase3e_verify.rs"
+
+[[test]]
+name = "phase3d2d_combined"
+path = "tests/phase3d2d_combined.rs"

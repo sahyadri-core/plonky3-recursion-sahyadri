@@ -102,11 +102,18 @@ where
         let c = public[4].clone() + public[5].clone();
 
         // 4. Bus push: this instance is the producer of one (a, b, c).
+        // Push only on the last row of the Poseidon2b trace. Without this,
+        // a 68-row permutation trace would push 68 tuples per instance, but
+        // each compression contributes exactly one tuple to the multiset.
+        // `is_last_row()` gives an indicator that is 1 on the final row and
+        // 0 elsewhere, so the multiset contains exactly one (a, b, c) per
+        // proved instance.
+        let selector = b.is_last_row();
         b.push_bus_interaction(
             MERKLE_COMPRESS,
             BusDirection::Push,
             [a, bb, c],
-            BusActivation::Always,
+            BusActivation::Boolean(selector),
         );
     }
 }
