@@ -48,6 +48,60 @@ pub const WIDTH: usize = COL_MERKLE_PARENT_BASE + MERKLE_DEPTH; // 18
 pub const FINAL_POLY_LEN: usize = 4;
 pub const NUM_PUBLIC: usize = FINAL_POLY_LEN;
 
+
+/// FRI-half constraints, offset-parametric. Used by `BinaryVerifierAir`
+/// (col_off=0, pub_off=0), `BinaryVerifierBusAir` (same), and
+/// `BinaryAggregationAir` (col_off=0/18, pub_off=0/4).
+pub fn eval_fri_half<AB: AirBuilder<F = BinaryField128>>(
+    b: &mut AB,
+    col_off: usize,
+    pub_off: usize,
+) {
+    let main = b.main();
+    let cur = main.current_slice();
+    let pair0: AB::Expr = cur[col_off + COL_PAIR0].into();
+    let pair1: AB::Expr = cur[col_off + COL_PAIR1].into();
+    let alpha: AB::Expr = cur[col_off + COL_ALPHA].into();
+    let next: AB::Expr = cur[col_off + COL_NEXT].into();
+    let sel: AB::Expr = cur[col_off + COL_SEL].into();
+    let is_last: AB::Expr = cur[col_off + COL_IS_LAST].into();
+    let s = [
+        AB::Expr::from(cur[col_off + COL_S0]),
+        AB::Expr::from(cur[col_off + COL_S1]),
+        AB::Expr::from(cur[col_off + COL_S2]),
+        AB::Expr::from(cur[col_off + COL_S3]),
+    ];
+    let one = AB::F::ONE;
+
+    for v in [&sel, &is_last, &s[0], &s[1], &s[2], &s[3]] {
+        let sq = v.clone() * v.clone();
+        b.assert_eq(sq + v.clone(), AB::F::ZERO);
+    }
+    for i in 0..FINAL_POLY_LEN {
+        for j in (i + 1)..FINAL_POLY_LEN {
+            b.assert_eq(s[i].clone() * s[j].clone(), AB::F::ZERO);
+        }
+    }
+    let selector_sum = s[0].clone() + s[1].clone() + s[2].clone() + s[3].clone();
+    b.assert_eq(is_last.clone() * (selector_sum + one), AB::F::ZERO);
+
+    let x = pair0.clone() + pair1.clone();
+    let y = sel * x;
+    let z = alpha * (pair1 + y.clone());
+    b.assert_eq(next.clone(), pair0 + y + z);
+
+    let public = b.public_values();
+    let fp: [AB::Expr; FINAL_POLY_LEN] = [
+        public[pub_off + 0].into(), public[pub_off + 1].into(),
+        public[pub_off + 2].into(), public[pub_off + 3].into(),
+    ];
+    let selected = s[0].clone() * fp[0].clone()
+        + s[1].clone() * fp[1].clone()
+        + s[2].clone() * fp[2].clone()
+        + s[3].clone() * fp[3].clone();
+    b.assert_eq(is_last * (next + selected), AB::F::ZERO);
+}
+
 pub struct BinaryVerifierAir;
 
 impl<F> BaseAir<F> for BinaryVerifierAir {
@@ -120,7 +174,7 @@ impl<AB: AirBuilder<F = BinaryField128> + BusInteractionBuilder> Air<AB>
     for BinaryVerifierBusAir
 {
     fn eval(&self, b: &mut AB) {
-        BinaryVerifierAir.eval(b);
+        eval_fri_half(b, 0, 0);
 
         let main = b.main();
         let cur = main.current_slice();
