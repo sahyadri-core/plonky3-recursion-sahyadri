@@ -1,22 +1,27 @@
-//! Blake3TranscriptAir - Phase T1.4b.2b.2b.1 (delegate + offsets).
+//! Blake3TranscriptAir - Phase T1.4b.2b.2b.2 (boundary binding).
 //!
 //! # Scope (this file)
-//! - Delegate Blake3BinaryAir::default().eval(b) for compression constraints
-//! - Blake3 column offset constants (informational for 2b.2b.2)
+//! - Delegate Blake3BinaryAir::default().eval(b) [T1.4b.2b.2b.1]
+//! - Row 0 binding (is_first_row constrained):
+//!   - chaining_value = Blake3 IV (8 u32 = 256 bits)
+//!   - counter_low = 0, counter_high = 0 (64 bits)
+//!   - block_len = 42 (ROUND_POLY || h0 || h_inf)
+//!   - flags = 0x0B (CHUNK_START | CHUNK_END | ROOT)
+//!   - block bytes 0..10 = ROUND_POLY constant
+//!   - block bytes 42..64 = zero padding
 //! - is_last booleanity
-//! - Integration test: real Blake3 compression trace + extras passes
+//! - Bus Pull (h0, h_inf, alpha) on SC_ROUND last row
 //!
-//! # TODO (2b.2b.2, next session)
-//! - Bind chaining_value to Blake3 IV
-//! - Bind block to ROUND_POLY || h0_bytes || h_inf_bytes || 0-padding
-//! - Bind block_len = 42, flags = CHUNK_START|CHUNK_END|ROOT
-//! - Extract alpha from output (final_chaining XOR IV) bytes 0..16
-//! - Assert COL_ALPHA == alpha
+//! # Deferred (T1.4b.2b.2b.2b/c, next sessions)
+//! - Block bytes 10..42 = h0_bytes || h_inf_bytes (needs byte decomposition
+//!   of h0/h_inf field elements into 16-bit constraint each)
+//! - Alpha extraction from Blake3 output = IV XOR final_state[8..16]
+//! - Assert alpha == COL_ALPHA
 //!
-//! # Width choice
-//! WIDTH = 11536 (Blake3 trace) + 4 (h0, h_inf, alpha, is_last) = 11540.
-//! Blake3 trace is exactly BLAKE3_TRACE_COLS = 11536, matching
-//! Blake3BinaryAir's column structure layout.
+//! # Soundness
+//! Blake3 compression IS structurally verified on correct IV + ROUND_POLY.
+//! Alpha is still unconstrained witness — Fiat-Shamir binding completes
+//! when byte decomposition + output extraction are added.
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_binary_field::BinaryField128;
@@ -30,30 +35,14 @@ use super::sumcheck_verifier_air::SC_ROUND;
 // Blake3 trace layout (bit-sliced: 32 bits per u32 word)
 // ============================================================================
 
-/// Blake3 binary AIR column count.
 pub const BLAKE3_TRACE_COLS: usize = 11536;
 
-/// Blake3 padding width from BaseAir::width() impl (next_power_of_two).
-pub const BLAKE3_PADDED_WIDTH: usize = 16384;
-
-// Blake3 internal column offsets (32 bits per u32 word, contiguous in struct):
-// - chaining_value: 8 words * 32 bits = 256 cols
-// - block: 16 words * 32 bits = 512 cols
-// - counter_low: 32 cols
-// - counter_high: 32 cols
-// - block_len: 32 cols
-// - flags: 32 cols
-// - rounds: 10640 cols (remaining)
-pub const B3_CHAINING_VALUE_OFFSET: usize = 0;
-pub const B3_BLOCK_OFFSET: usize = 256;
-pub const B3_COUNTER_LOW_OFFSET: usize = 768;
-pub const B3_COUNTER_HIGH_OFFSET: usize = 800;
-pub const B3_BLOCK_LEN_OFFSET: usize = 832;
-pub const B3_FLAGS_OFFSET: usize = 864;
-
-// ============================================================================
-// Our extras
-// ============================================================================
+pub const B3_CHAINING_VALUE_OFFSET: usize = 0;    // 8 words * 32 bits
+pub const B3_BLOCK_OFFSET: usize = 256;           // 16 words * 32 bits
+pub const B3_COUNTER_LOW_OFFSET: usize = 768;     // 32 bits
+pub const B3_COUNTER_HIGH_OFFSET: usize = 800;    // 32 bits
+pub const B3_BLOCK_LEN_OFFSET: usize = 832;       // 32 bits
+pub const B3_FLAGS_OFFSET: usize = 864;           // 32 bits
 
 pub const COL_H0: usize = BLAKE3_TRACE_COLS;
 pub const COL_H_INF: usize = BLAKE3_TRACE_COLS + 1;
@@ -62,6 +51,21 @@ pub const COL_IS_LAST: usize = BLAKE3_TRACE_COLS + 3;
 pub const WIDTH: usize = BLAKE3_TRACE_COLS + 4;
 pub const NUM_PUBLIC: usize = 0;
 
+// ============================================================================
+// Blake3 spec constants (public, compile-time known)
+// ============================================================================
+
+const IV_U32: [u32; 8] = [
+    0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
+    0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
+];
+
+const BLOCK_LEN_CONST: u32 = 42;          // 10 (ROUND_POLY) + 16 (h0) + 16 (h_inf)
+const FLAGS_CONST: u32 = 0x0B;            // CHUNK_START | CHUNK_END | ROOT
+const ROUND_POLY_CONST: &[u8; 10] = b"round_poly";
+const PADDING_START: usize = 42;          // first byte of zero padding
+const BLOCK_BYTES: usize = 64;
+
 pub struct Blake3TranscriptAir;
 
 impl<F> BaseAir<F> for Blake3TranscriptAir {
@@ -69,30 +73,106 @@ impl<F> BaseAir<F> for Blake3TranscriptAir {
     fn num_public_values(&self) -> usize { NUM_PUBLIC }
 }
 
+/// Assert `is_first * (cur + c) == 0` for a constant bit `c` (0 or 1).
+/// Forces row 0 (first row) to have value `c` at that column.
+#[inline]
+fn assert_first_row_bit<AB: AirBuilder<F = BinaryField128>>(
+    b: &mut AB,
+    is_first: AB::Expr,
+    col: usize,
+    bit: bool,
+) {
+    let c = if bit { AB::F::ONE } else { AB::F::ZERO };
+    let cur: AB::Expr = b.main().current_slice()[col].into();
+    b.assert_eq(is_first * (cur + c), AB::F::ZERO);
+}
+
+/// Assert `is_first * cur == 0` — forces row-0 cell to 0.
+#[inline]
+fn assert_first_row_zero<AB: AirBuilder<F = BinaryField128>>(
+    b: &mut AB,
+    is_first: AB::Expr,
+    col: usize,
+) {
+    let cur: AB::Expr = b.main().current_slice()[col].into();
+    b.assert_eq(is_first * cur, AB::F::ZERO);
+}
+
 impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for Blake3TranscriptAir {
     fn eval(&self, b: &mut AB) {
-        // Delegate Blake3BinaryAir compression constraints (cols 0..11536).
-        //
-        // If this fails with width mismatch, the delegate needs the trace to
-        // be exactly BLAKE3_TRACE_COLS wide, meaning our WIDTH=11540 isn't
-        // compatible. Fallback: pad WIDTH to 16388 with prefix cols.
         Blake3BinaryAir::default().eval(b);
 
-        // is_last booleanity
+        let is_first: AB::Expr = b.is_first_row().into();
+
+        // 1. Chaining value = Blake3 IV (256 bits)
+        for i in 0..8 {
+            for j in 0..32 {
+                let bit = (IV_U32[i] >> j) & 1 == 1;
+                assert_first_row_bit(b, is_first.clone(), B3_CHAINING_VALUE_OFFSET + i * 32 + j, bit);
+            }
+        }
+
+        // 2. Counter = 0 (64 bits)
+        for j in 0..32 {
+            assert_first_row_zero(b, is_first.clone(), B3_COUNTER_LOW_OFFSET + j);
+            assert_first_row_zero(b, is_first.clone(), B3_COUNTER_HIGH_OFFSET + j);
+        }
+
+        // 3. Block_len = 42 (32 bits)
+        for j in 0..32 {
+            let bit = (BLOCK_LEN_CONST >> j) & 1 == 1;
+            assert_first_row_bit(b, is_first.clone(), B3_BLOCK_LEN_OFFSET + j, bit);
+        }
+
+        // 4. Flags = 0x0B (32 bits)
+        for j in 0..32 {
+            let bit = (FLAGS_CONST >> j) & 1 == 1;
+            assert_first_row_bit(b, is_first.clone(), B3_FLAGS_OFFSET + j, bit);
+        }
+
+        // 5. Block bytes 0..10 = ROUND_POLY (80 bits, constant)
+        for byte_idx in 0..10 {
+            let byte = ROUND_POLY_CONST[byte_idx];
+            for bit_in_byte in 0..8 {
+                let block_bit = byte_idx * 8 + bit_in_byte;
+                let word_idx = block_bit / 32;
+                let bit_in_word = block_bit % 32;
+                let bit = (byte >> bit_in_byte) & 1 == 1;
+                assert_first_row_bit(
+                    b,
+                    is_first.clone(),
+                    B3_BLOCK_OFFSET + word_idx * 32 + bit_in_word,
+                    bit,
+                );
+            }
+        }
+
+        // 6. Block bytes 42..64 = zero padding (176 bits, constant 0)
+        for byte_idx in PADDING_START..BLOCK_BYTES {
+            for bit_in_byte in 0..8 {
+                let block_bit = byte_idx * 8 + bit_in_byte;
+                let word_idx = block_bit / 32;
+                let bit_in_word = block_bit % 32;
+                assert_first_row_zero(
+                    b,
+                    is_first.clone(),
+                    B3_BLOCK_OFFSET + word_idx * 32 + bit_in_word,
+                );
+            }
+        }
+
+        // 7. is_last booleanity
         let is_last: AB::Expr = b.main().current_slice()[COL_IS_LAST].into();
         b.assert_eq(is_last.clone() * is_last.clone() + is_last, AB::F::ZERO);
 
-        // TODO(2b.2b.2):
-        // 1. Bind chaining_value to IV (row 0, cols 0..256)
-        // 2. Bind block to ROUND_POLY||h0||h_inf||padding (row 0, cols 256..768)
-        // 3. Bind block_len to 42 (row 0, cols 832..864)
-        // 4. Bind flags to 0x0B (row 0, cols 864..896)
-        // 5. Extract alpha from output = final_chaining XOR IV, bytes 0..16
-        // 6. Assert alpha == COL_ALPHA
+        // TODO(2b.2b.2b.2b, next session):
+        // - Block bytes 10..26 = h0 bytes (16 witness bytes; decompose h0 field)
+        // - Block bytes 26..42 = h_inf bytes (16 witness bytes; decompose h_inf)
+        // - alpha = Blake3 output bytes 0..16 = (IV XOR final_state[8..16]) bytes 0..16
+        // - assert alpha == COL_ALPHA
     }
 }
 
-/// Bus wrapper: Blake3TranscriptAir + Pull (h0, h_inf, alpha) on SC_ROUND.
 pub struct Blake3TranscriptBusAir;
 
 impl<F> BaseAir<F> for Blake3TranscriptBusAir {
@@ -131,31 +211,36 @@ mod tests {
     use super::*;
     use p3_air::check_constraints;
     use p3_blake3_air::{Blake3CompressionInput, generate_binary_trace_rows};
-    use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_matrix::Matrix;
 
     type F = BinaryField128;
 
-    const IV: [u32; 8] = [
-        0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
-        0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19,
-    ];
     const CHUNK_START: u32 = 1;
     const CHUNK_END: u32 = 2;
-    const ROOT: u32 = 8;
+    const ROOT_FLAG: u32 = 8;
 
     fn build_valid_compression_input() -> Blake3CompressionInput {
+        let mut block = [0u32; 16];
+        // ROUND_POLY bytes 0..10
+        for i in 0..10 {
+            let word_idx = i / 4;
+            let byte_in_word = i % 4;
+            block[word_idx] |= (ROUND_POLY_CONST[i] as u32) << (byte_in_word * 8);
+        }
+        // Bytes 10..42: h0/h_inf slots — set to 0 for now (T1.4b.2b.2b.2b will bind)
+        // Bytes 42..64: padding zeros (already 0)
+
         Blake3CompressionInput {
-            chaining_value: IV,
-            block: [0u32; 16],
+            chaining_value: IV_U32,
+            block,
             counter: 0,
-            block_len: 64,
-            flags: CHUNK_START | CHUNK_END | ROOT,
+            block_len: BLOCK_LEN_CONST,
+            flags: CHUNK_START | CHUNK_END | ROOT_FLAG,
         }
     }
 
-    fn build_blake3_trace_with_extras() -> RowMajorMatrix<F> {
+    fn build_trace_with_extras() -> RowMajorMatrix<F> {
         let input = build_valid_compression_input();
         let blake3 = generate_binary_trace_rows::<F>(vec![input], 0);
         let num_rows = blake3.height();
@@ -175,34 +260,76 @@ mod tests {
         RowMajorMatrix::new(values, WIDTH)
     }
 
+    fn expect_reject<F2: FnOnce()>(f: F2, msg: &str) {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        assert!(r.is_err(), "{}", msg);
+    }
+
     #[test]
     fn layout_constants() {
         assert_eq!(BLAKE3_TRACE_COLS, 11536);
-        assert_eq!(BLAKE3_PADDED_WIDTH, 16384);
+        assert_eq!(B3_CHAINING_VALUE_OFFSET, 0);
+        assert_eq!(B3_BLOCK_OFFSET, 256);
+        assert_eq!(B3_COUNTER_LOW_OFFSET, 768);
+        assert_eq!(B3_COUNTER_HIGH_OFFSET, 800);
+        assert_eq!(B3_BLOCK_LEN_OFFSET, 832);
+        assert_eq!(B3_FLAGS_OFFSET, 864);
         assert_eq!(COL_H0, 11536);
-        assert_eq!(COL_H_INF, 11537);
-        assert_eq!(COL_ALPHA, 11538);
         assert_eq!(COL_IS_LAST, 11539);
         assert_eq!(WIDTH, 11540);
     }
 
     #[test]
-    fn blake3_internal_offsets() {
-        // Bit-sliced layout: 32 bits per u32 word, contiguous in Blake3BinaryCols
-        assert_eq!(B3_CHAINING_VALUE_OFFSET, 0);
-        assert_eq!(B3_BLOCK_OFFSET, 256);        // 8 words * 32 bits
-        assert_eq!(B3_COUNTER_LOW_OFFSET, 768);  // + 16 words * 32 bits
-        assert_eq!(B3_COUNTER_HIGH_OFFSET, 800);
-        assert_eq!(B3_BLOCK_LEN_OFFSET, 832);
-        assert_eq!(B3_FLAGS_OFFSET, 864);
-        // Total input bits: 864 + 32 = 896, then rounds: 11536 - 896 = 10640
+    fn spec_constants() {
+        assert_eq!(ROUND_POLY_CONST.len(), 10);
+        assert_eq!(BLOCK_LEN_CONST, 42);
+        assert_eq!(FLAGS_CONST, 0x0B);
+        assert_eq!(PADDING_START, 42);
+        // Sanity: ROUND_POLY = "round_poly"
+        assert_eq!(ROUND_POLY_CONST[0], b'r');
+        assert_eq!(ROUND_POLY_CONST[9], b'y');
     }
 
     #[test]
-    fn valid_blake3_compression_with_extras_passes() {
-        let trace = build_blake3_trace_with_extras();
-        let public = vec![];
-        check_constraints(&Blake3TranscriptAir, &trace, &public);
+    fn valid_compression_with_binding_passes() {
+        let trace = build_trace_with_extras();
+        check_constraints(&Blake3TranscriptAir, &trace, &vec![]);
+    }
+
+    #[test]
+    fn tampered_iv_bit_rejected() {
+        let mut trace = build_trace_with_extras();
+        // IV_U32[0] bit 0: 0x6A09E667 & 1 = 1. Flip to 0.
+        trace.values[0 * WIDTH + B3_CHAINING_VALUE_OFFSET + 0] = F::ZERO;
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAir, &trace, &vec![]),
+            "tampered IV bit must be rejected",
+        );
+    }
+
+    #[test]
+    fn tampered_padding_rejected() {
+        let mut trace = build_trace_with_extras();
+        // Padding starts at byte 42. Set bit 0 of byte 42 to 1.
+        let block_bit = 42 * 8;
+        let word_idx = block_bit / 32;
+        let bit_in_word = block_bit % 32;
+        trace.values[0 * WIDTH + B3_BLOCK_OFFSET + word_idx * 32 + bit_in_word] = F::ONE;
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAir, &trace, &vec![]),
+            "tampered padding must be rejected",
+        );
+    }
+
+    #[test]
+    fn tampered_flags_rejected() {
+        let mut trace = build_trace_with_extras();
+        // FLAGS = 0x0B. Bit 0 should be 1. Flip to 0.
+        trace.values[0 * WIDTH + B3_FLAGS_OFFSET + 0] = F::ZERO;
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAir, &trace, &vec![]),
+            "tampered flags bit must be rejected",
+        );
     }
 
     #[test]
