@@ -222,3 +222,11 @@ path = "tests/t1_4b2c_blake3_transcript_prove.rs"
 [[test]]
 name = "t1_4b2c_bus_integration"
 path = "tests/t1_4b2c_bus_integration.rs"
+
+[[test]]
+name = "t1_5_probe_plonky3_bus_verifier"
+path = "tests/t1_5_probe_plonky3_bus_verifier.rs"
+
+[[test]]
+name = "t1_5a_sc_fri_coexist"
+path = "tests/t1_5a_sc_fri_coexist.rs"
