@@ -218,3 +218,7 @@ path = "tests/phase_t1_2a_tree_loop.rs"
 [[test]]
 name = "t1_4b2c_blake3_transcript_prove"
 path = "tests/t1_4b2c_blake3_transcript_prove.rs"
+
+[[test]]
+name = "t1_4b2c_bus_integration"
+path = "tests/t1_4b2c_bus_integration.rs"
