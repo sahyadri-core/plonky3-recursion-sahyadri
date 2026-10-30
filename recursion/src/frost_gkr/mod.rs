@@ -363,5 +363,6 @@ pub mod binary_aggregation_air;
 pub mod binary_verifier_air;
 pub mod sumcheck_verifier_air;
 pub mod sponge_permute_bus_air;
+pub mod blake3_transcript_air;
 pub mod fri_verifier_air_v2;
 pub mod blake3_bridge;
