@@ -59,7 +59,7 @@ p3-baby-bear = "0.8.0"
 p3-batch-stark = "0.8.0"
 p3-binary-dft = "0.8.0"
 p3-binary-field = "0.8.0"
-p3-binary-pcs = "0.8.0"
+p3-binary-pcs = { version = "0.8.0", features = ["std"] }
 p3-blake3 = "0.8.0"
 p3-blake3-air = "0.8.0"
 p3-bus = "0.8.0"
@@ -113,6 +113,7 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 unroll = { version = "0.1.5", default-features = false }
 
 [patch.crates-io]
+p3-binary-pcs = { path = "vendor/p3-binary-pcs" }
 p3-blake3-air = { path = "vendor/p3-blake3-air" }
 p3-fri = { path = "vendor/p3-fri" }
 p3-sumcheck = { path = "vendor/p3-sumcheck" }
