@@ -242,3 +242,7 @@ path = "tests/t1_5d_proof_extraction.rs"
 [[test]]
 name = "t1_5d_step34_public_binding"
 path = "tests/t1_5d_step34_public_binding.rs"
+
+[[test]]
+name = "pathA_real_proof_integration"
+path = "tests/pathA_real_proof_integration.rs"
