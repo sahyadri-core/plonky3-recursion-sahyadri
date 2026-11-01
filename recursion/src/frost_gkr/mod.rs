@@ -362,6 +362,7 @@ pub mod combined_air;
 pub mod binary_aggregation_air;
 pub mod binary_verifier_air;
 pub mod binary_verifier_air_v2;
+pub mod recursive_verifier_air;
 pub mod bit_decomp_air;
 pub mod compressed_sumcheck_air;
 pub mod sumcheck_verifier_air;
