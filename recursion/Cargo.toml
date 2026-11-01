@@ -230,3 +230,7 @@ path = "tests/t1_5_probe_plonky3_bus_verifier.rs"
 [[test]]
 name = "t1_5a_sc_fri_coexist"
 path = "tests/t1_5a_sc_fri_coexist.rs"
+
+[[test]]
+name = "t1_5bc_three_air_coexist"
+path = "tests/t1_5bc_three_air_coexist.rs"
