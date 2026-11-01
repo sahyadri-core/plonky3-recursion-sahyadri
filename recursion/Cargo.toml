@@ -238,3 +238,7 @@ path = "tests/t1_5bc_three_air_coexist.rs"
 [[test]]
 name = "t1_5d_proof_extraction"
 path = "tests/t1_5d_proof_extraction.rs"
+
+[[test]]
+name = "t1_5d_step34_public_binding"
+path = "tests/t1_5d_step34_public_binding.rs"
