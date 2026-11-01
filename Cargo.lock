@@ -748,8 +748,6 @@ dependencies = [
 [[package]]
 name = "p3-binary-field"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fae8d58121ed5478834484dc0371302c8a4684287c3e90781d9872580b92c88"
 dependencies = [
  "num-bigint",
  "p3-challenger",
@@ -1824,11 +1822,13 @@ dependencies = [
  "p3-air",
  "p3-binary-field",
  "p3-bus",
+ "p3-commit",
  "p3-field",
  "p3-matrix",
  "p3-poseidon2b",
  "p3-symmetric",
  "p3-util",
+ "serde",
  "thiserror 1.0.69",
 ]
 

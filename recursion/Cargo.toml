@@ -266,3 +266,7 @@ path = "tests/t1_2b_v2_real_proof.rs"
 [[test]]
 name = "t1_3_real_leaves_scale"
 path = "tests/t1_3_real_leaves_scale.rs"
+
+[[test]]
+name = "t1_4c_s2_poseidon2b_binarypcs"
+path = "tests/t1_4c_s2_poseidon2b_binarypcs.rs"
