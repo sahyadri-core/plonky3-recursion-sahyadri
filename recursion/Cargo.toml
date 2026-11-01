@@ -250,3 +250,7 @@ path = "tests/pathA_real_proof_integration.rs"
 [[test]]
 name = "pathA_three_air_assembly"
 path = "tests/pathA_three_air_assembly.rs"
+
+[[test]]
+name = "t1_3_scale_loop"
+path = "tests/t1_3_scale_loop.rs"
