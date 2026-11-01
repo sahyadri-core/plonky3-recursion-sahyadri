@@ -31,11 +31,10 @@
 //! C1: is_real is boolean
 //! C2: reconstruct_from_bits(bits) == public[0]  [TBD next session]
 //!
-//! # TODO (next session, after `blk_to_le_bytes` discovery)
-//! - C2: tower multiplication to reconstruct BF128 from 128 bits
-//! - The exact tower formula (which polynomial, which level ordering)
-//!   depends on Plonky3's `BinaryField128` implementation
-//! - Once `blk_to_le_bytes` semantics are known, C2 is straightforward
+//! # C2 IMPLEMENTED (byte-level reconstruction)
+//! Since BF128 addition = XOR of bit patterns, reconstructing from bits is
+//! just XOR-accumulating `bit_i * from_le_bytes(2^i)`. This matches the bit
+//! pattern of the field element, no tower decomposition needed.
 //!
 //! # Status: SCAFFOLD
 //! Layout + booleanity implemented. C2 reconstruction TBD.
@@ -74,11 +73,28 @@ impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for BitDecompAir {
             b.assert_eq(is_real.clone() * (bit_sq + bit), zero);
         }
 
-        // C2: TODO -- reconstruct_from_bits(bits) == public[0]
-        // Needs tower decomposition formula from `blk_to_le_bytes` internals.
-        // Currently unconstrained: the bits are boolean but not yet bound to
-        // any specific field value.
-        let _ = b.public_values();
+        // C2: byte-level reconstruction.
+        //
+        // Key property: `blk_to_le_bytes` shows BF128 stored as u128.
+        // Adding two field elements = XOR of bit patterns.
+        // So: field_from_le_bytes(a) + field_from_le_bytes(b) = field_from_le_bytes(a XOR b).
+        //
+        // Therefore: sum_i bit_i * from_le_bytes(2^i) = from_le_bytes(sum_i bit_i * 2^i)
+        //            = from_le_bytes(u128_with_bit_i_set_where_bit_i=1)
+        //            = from_le_bytes(to_repr(public[0]))
+        //            = public[0]
+        //
+        // Constraint: is_real * (reconstructed + public[0]) = 0 (char 2, + is XOR)
+        let mut reconstructed: AB::Expr = AB::F::ZERO.into();
+        for i in 0..BITS {
+            let bit: AB::Expr = cur[i].into();
+            let basis_bytes = (1u128 << i).to_le_bytes();
+            let basis_f = BinaryField128::from_le_bytes(basis_bytes);
+            let basis: AB::Expr = basis_f.into();
+            reconstructed = reconstructed + bit * basis;
+        }
+        let pub_val: AB::Expr = b.public_values()[0].into();
+        b.assert_eq(is_real.clone() * (reconstructed + pub_val), zero);
     }
 }
 
@@ -93,14 +109,15 @@ mod tests {
     fn blk(n: u128) -> F { F::from_le_bytes(n.to_le_bytes()) }
 
     fn build_valid_trace() -> (RowMajorMatrix<F>, Vec<F>) {
-        // Single row, bits are boolean (C0 satisfied), is_real=1
+        // Single row, is_real=1, bits match public value.
+        let value: u128 = 0xAAAA_BBBB_CCCC_DDDD;
         let mut values = vec![F::ZERO; WIDTH];
-        // Set bits arbitrarily (booleanity satisfied; C2 TBD)
         for i in 0..BITS {
-            values[i] = if i % 2 == 0 { F::ONE } else { F::ZERO };
+            values[i] = if (value >> i) & 1 == 1 { F::ONE } else { F::ZERO };
         }
         values[COL_IS_REAL] = F::ONE;
-        (RowMajorMatrix::new(values, WIDTH), vec![blk(0xAAAA)])
+        let public_val = BinaryField128::from_le_bytes(value.to_le_bytes());
+        (RowMajorMatrix::new(values, WIDTH), vec![public_val])
     }
 
     fn expect_reject<F2: FnOnce()>(f: F2, msg: &str) {
@@ -138,6 +155,27 @@ mod tests {
         expect_reject(
             || check_constraints(&BitDecompAir, &trace, &public),
             "non-boolean is_real must fail booleanity",
+        );
+    }
+
+    #[test]
+    fn wrong_public_rejected() {
+        let (trace, mut public) = build_valid_trace();
+        public[0] = public[0] + F::ONE;  // change expected value
+        expect_reject(
+            || check_constraints(&BitDecompAir, &trace, &public),
+            "wrong public value must fail C2",
+        );
+    }
+
+    #[test]
+    fn flipped_bit_rejected() {
+        let (mut trace, public) = build_valid_trace();
+        // Flip bit 10 -- breaks reconstruction
+        trace.values[10] = if trace.values[10] == F::ONE { F::ZERO } else { F::ONE };
+        expect_reject(
+            || check_constraints(&BitDecompAir, &trace, &public),
+            "flipped bit must fail C2",
         );
     }
 }
