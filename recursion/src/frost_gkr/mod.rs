@@ -361,6 +361,7 @@ pub mod poseidon2b_bus_air;
 pub mod combined_air;
 pub mod binary_aggregation_air;
 pub mod binary_verifier_air;
+pub mod binary_verifier_air_v2;
 pub mod bit_decomp_air;
 pub mod compressed_sumcheck_air;
 pub mod sumcheck_verifier_air;
