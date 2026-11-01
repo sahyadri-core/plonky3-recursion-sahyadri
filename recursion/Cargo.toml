@@ -254,3 +254,7 @@ path = "tests/pathA_three_air_assembly.rs"
 [[test]]
 name = "t1_3_scale_loop"
 path = "tests/t1_3_scale_loop.rs"
+
+[[test]]
+name = "t1_2b_extract_inspect"
+path = "tests/t1_2b_extract_inspect.rs"
