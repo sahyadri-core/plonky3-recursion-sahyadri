@@ -258,3 +258,11 @@ path = "tests/t1_3_scale_loop.rs"
 [[test]]
 name = "t1_2b_extract_inspect"
 path = "tests/t1_2b_extract_inspect.rs"
+
+[[test]]
+name = "t1_2b_step2_structure"
+path = "tests/t1_2b_step2_structure.rs"
+
+[[test]]
+name = "t1_2b_step3_diagnose_fold"
+path = "tests/t1_2b_step3_diagnose_fold.rs"
