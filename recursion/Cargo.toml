@@ -246,3 +246,7 @@ path = "tests/t1_5d_step34_public_binding.rs"
 [[test]]
 name = "pathA_real_proof_integration"
 path = "tests/pathA_real_proof_integration.rs"
+
+[[test]]
+name = "pathA_three_air_assembly"
+path = "tests/pathA_three_air_assembly.rs"
