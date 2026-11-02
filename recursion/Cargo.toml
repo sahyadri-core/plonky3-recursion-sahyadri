@@ -282,3 +282,15 @@ path = "tests/t1_4c_s4_sub3_merkle_wire.rs"
 [[test]]
 name = "s1_pathb_recursive_compose"
 path = "tests/s1_pathb_recursive_compose.rs"
+
+[[test]]
+name = "s2_eight_leaf_tree"
+path = "tests/s2_eight_leaf_tree.rs"
+
+[[test]]
+name = "s3_cached_scale"
+path = "tests/s3_cached_scale.rs"
+
+[[test]]
+name = "s3b_batched_scale"
+path = "tests/s3b_batched_scale.rs"
