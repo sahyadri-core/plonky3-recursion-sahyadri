@@ -207,6 +207,9 @@ fn combined_prove_and_verify() {
         &mut ch_prove,
     ).expect("combined prove should succeed");
     println!("PROVE OK, size ~{} B", core::mem::size_of_val(&proof));
+    if let Ok(bytes) = postcard::to_allocvec(&proof) {
+        println!("PROOF SERIALIZED: {} B (postcard)", bytes.len());
+    }
 
     // 7. Verify
     let log_height = 2; // 4 rows

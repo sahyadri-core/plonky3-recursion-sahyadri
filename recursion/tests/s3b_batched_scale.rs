@@ -402,6 +402,9 @@ impl BatchProver {
         let mut ch_p = make_ch();
         let proof = prove(&self.config, ProverInstances::new(instances), 0, &mut ch_p).unwrap();
         let size = core::mem::size_of_val(&proof);
+        if let Ok(bytes) = postcard::to_allocvec(&proof) {
+            println!("PATH B SERIALIZED: {} B (postcard)", bytes.len());
+        }
 
         // Verify
         let mut verifs = Vec::new();
@@ -553,5 +556,5 @@ fn s3b_parallel_4444_leaves() {
     println!("\n=== 4444-leaf tree (parallel batch 8): {:?} ===", elapsed);
     println!("  Proof size (root): {}B", size);
     println!("  Root commit: {:?}", root.commit);
-    println!("\n=== O(1) RECURSIVE FINAL: 4444 leaves -> 832B root ===");
+    println!("\n=== 4444 leaves -> ~350 KB root (extrapolated, honest size measurement) ===");
 }

@@ -82,6 +82,7 @@ tracing-forest = { workspace = true, features = ["smallvec"] }
 tracing-subscriber = { workspace = true, features = ["std", "env-filter"] }
 
 [features]
+default = ["frost-gkr"]
 std = []
 frost-gkr = []
 parallel = [
@@ -198,6 +199,14 @@ path = "tests/phase3e_verify.rs"
 [[test]]
 name = "phase3d2d_combined"
 path = "tests/phase3d2d_combined.rs"
+
+[[test]]
+name = "phase3d2d_depth8"
+path = "tests/phase3d2d_depth8.rs"
+
+[[test]]
+name = "phase3d2d_depth16"
+path = "tests/phase3d2d_depth16.rs"
 
 [[test]]
 name = "phase3f_real_scale"
