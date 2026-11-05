@@ -3,7 +3,7 @@
 //! # Scope
 //! - Synthetic leaves (real leaves via T1.2b extraction, next session)
 //! - Pairwise aggregation loop (log2(N) levels)
-//! - Root verification: single 832B proof
+//! - Root verification: single proof; size_of_val 832 B (struct header), serialized ~200 KB
 //!
 //! # Pipeline
 //! Level 0: N leaf traces (SC + FRI)
@@ -290,7 +290,7 @@ fn t1_3_two_level_tree() {
     println!("Level 2 (root) {}B, {:?}", root_sz, start.elapsed());
 
     println!("\n=== T1.3 two-level tree PASS ===");
-    assert_eq!(root_sz, 832, "root proof size should be ~832B (constant)");
+    assert_eq!(root_sz, 832, "root proof size_of_val is 832B (struct header); serialized ~200 KB");
 }
 
 #[test]

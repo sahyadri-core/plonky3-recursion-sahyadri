@@ -7,7 +7,8 @@
 //!
 //! # Honest scope
 //! - Loop mechanics: proves pairwise aggregation at each level
-//! - Proof size constant: root is same ~832B regardless of leaf count
+//! - Proof size: root `size_of_val` is 832 B (struct header).
+//!   Serialized (postcard) size ~200 KB at depth 8, ~430 KB at depth 16.
 //! - log2(N) levels: 4 leaves → 2 levels
 //!
 //! # Not in scope (needs T1.2b)
@@ -286,7 +287,10 @@ fn t1_2a_four_leaf_tree() {
 
     println!("\n=== T1.2a PASS ===");
     println!("Levels: 2 (4 leaves → 1 root)");
-    println!("Root proof size: {}B (constant, same as T1.1 832B)", root_sz);
+    println!("Root proof size_of_val: {}B (struct header)", root_sz);
+    if let Ok(b) = postcard::to_allocvec(&root_proof) {
+        println!("Root proof serialized: {}B (postcard)", b.len());
+    }
     println!("Total time: {:?}", start.elapsed());
     assert_eq!(root_sz, 832, "root proof size must be constant");
 }

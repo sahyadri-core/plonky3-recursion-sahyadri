@@ -1,7 +1,7 @@
 //! Session B: 8-leaf tree via Path B composition.
 //!
 //! # Design
-//! Node = proof (832B) + fold_state + sc_state + commit.
+//! Node = proof (size_of_val 832B = struct header; serialized ~200 KB) + fold_state + sc_state + commit.
 //! Compose(left, right) → new node, commit = poseidon2b(left.commit, right.commit).
 //! 3 levels: 8 → 4 → 2 → 1 root.
 //!
@@ -13,7 +13,7 @@
 //! Same soundness tier as Parano1d (honest-prover).
 //!
 //! # Speed
-//! 15 compositions × 298ms ≈ 4.5s sequential. Root 832B constant.
+//! 15 compositions × 298ms ≈ 4.5s sequential. Root size_of_val 832B (serialized ~200 KB, measured).
 
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_binary_field::BinaryField128;
@@ -481,7 +481,9 @@ fn s2_eight_leaf_tree() {
         4443.0 * times.iter().sum::<f64>() / times.len() as f64 / 1000.0 / 16.0);
 
     assert_eq!(depth, 3, "8 leaves = 3 levels");
-    assert_eq!(sizes[0], 832, "constant 832B proof");
+    assert_eq!(sizes[0], 832, "size_of_val struct header stays 832B");
+        // Honest: serialized size is what matters for wire size.
+        // See depth8/depth16 tests for measured ~200 KB / ~430 KB.
 }
 
 // ============================================================================
@@ -586,7 +588,7 @@ fn s3_cached_32_leaves() {
     println!("  Sequential: {:.1}s", 4443.0 * avg_ms / 1000.0);
     println!("  16-core parallel: {:.1}s", 4443.0 * avg_ms / 1000.0 / 16.0);
     println!("\n=== Session C: 32-leaf PASS ===");
-    assert_eq!(sizes[0], 832, "832B constant");
+    assert_eq!(sizes[0], 832, "size_of_val struct header stays 832B");
 }
 
 #[test]

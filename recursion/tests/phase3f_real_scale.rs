@@ -12,8 +12,8 @@
 //!     Phase A2.3e. This is the honest architectural limit, not a code bug.
 //!
 //! What this produces:
-//!   - N independent MultiStark proofs, each ~832 bytes
-//!   - Bundle size = N * 832 bytes (4444 proofs = ~3.6 MB)
+//!   - N independent MultiStark proofs, each size_of_val ~832 bytes (serialized ~200 KB)
+//!   - Bundle size (size_of_val) = N * 832 bytes; serialized = N * ~200 KB
 //!   - Verification is O(N): loop over each proof, verify individually
 //!
 //! This is NOT O(1). O(1) chain proof uses a different path:

@@ -7,7 +7,7 @@
 //! # What this validates
 //! - `GroupedCodewordMmcs<Poseidon2bMmcs>` type-checks
 //! - BinaryPcs commit/prove/verify works with Poseidon2b
-//! - Proof size sanity (~832B expected, similar to blake3)
+//! - Proof size sanity: size_of_val ~832 B (struct header); serialized ~200 KB expected
 //!
 //! # Not in scope (Session 3)
 //! - Migration of T1.2b/T1.3 tests (type swap + regression re-run)
