@@ -344,3 +344,169 @@ mod tests {
         let _ = Blake3TranscriptBusAir;
     }
 }
+
+// ============================================================================
+// S8 Phase 2: Blake3TranscriptAirWithBits
+// ============================================================================
+//
+// Extends Blake3TranscriptAir with 256 extra columns:
+//   - 128 bits for h0 (field element)
+//   - 128 bits for h_inf (field element)
+//
+// # New constraints (gated by is_first row)
+// - C_A: h0_bits booleanity
+// - C_B: h_inf_bits booleanity
+// - C_C: block bits 10..26 == h0_bits (byte-for-byte binding)
+// - C_D: block bits 26..42 == h_inf_bits
+// - C_E: sum(h0_bits[i] * X_i) == COL_H0  [bit reconstruction]
+// - C_F: sum(h_inf_bits[i] * X_i) == COL_H_INF
+//
+// This closes the FSI gap: previously COL_H0/COL_H_INF were witness
+// (bus-pulled from SC). Now they are bound to the actual h0/h_inf bytes
+// used inside the Blake3 compression, forcing the transcript output
+// (alpha) to depend on the true h0/h_inf values.
+//
+// Combined with the Blake3 output → alpha extraction (Phase 3, next session),
+// this gives full Fiat-Shamir soundness: alpha == Blake3(commitment || h0 || h_inf).
+//
+// # Column layout (extends base)
+// - 0..11536      : Blake3 bit-sliced trace
+// - 11536         : COL_H0 (field)
+// - 11537         : COL_H_INF (field)
+// - 11538         : COL_ALPHA (witness, Phase 3 will constrain)
+// - 11539         : COL_IS_LAST
+// - 11540..11668  : h0 bits[0..128]     [NEW]
+// - 11668..11796  : h_inf bits[0..128]  [NEW]
+
+pub const COL_H0_BITS_BASE: usize = WIDTH;           // 11540
+pub const COL_HINF_BITS_BASE: usize = WIDTH + 128;   // 11668
+pub const WIDTH_WITH_BITS: usize = WIDTH + 256;      // 11796
+
+pub struct Blake3TranscriptAirWithBits;
+
+impl<F> BaseAir<F> for Blake3TranscriptAirWithBits {
+    fn width(&self) -> usize { WIDTH_WITH_BITS }
+    fn num_public_values(&self) -> usize { NUM_PUBLIC }
+}
+
+impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for Blake3TranscriptAirWithBits {
+    fn eval(&self, b: &mut AB) {
+        // Delegate to base AIR (Blake3 compression + IV + counter + flags + padding + bus Pull)
+        Blake3TranscriptAir.eval(b);
+
+        let is_first: AB::Expr = b.is_first_row().into();
+        let zero = AB::F::ZERO;
+
+        // Extract all values in one borrow scope
+        let (h0, h_inf, h0_bits, h_inf_bits, block_h0_bits, block_hinf_bits) = {
+            let main = b.main();
+            let cur = main.current_slice();
+            let h0: AB::Expr = cur[COL_H0].into();
+            let h_inf: AB::Expr = cur[COL_H_INF].into();
+            let h0_bits: Vec<AB::Expr> = (0..128)
+                .map(|i| cur[COL_H0_BITS_BASE + i].into())
+                .collect();
+            let h_inf_bits: Vec<AB::Expr> = (0..128)
+                .map(|i| cur[COL_HINF_BITS_BASE + i].into())
+                .collect();
+            // Block bits 10..26 = block bit positions 80..208
+            let block_h0_bits: Vec<AB::Expr> = (0..128)
+                .map(|i| cur[B3_BLOCK_OFFSET + 80 + i].into())
+                .collect();
+            // Block bits 26..42 = block bit positions 208..336
+            let block_hinf_bits: Vec<AB::Expr> = (0..128)
+                .map(|i| cur[B3_BLOCK_OFFSET + 208 + i].into())
+                .collect();
+            (h0, h_inf, h0_bits, h_inf_bits, block_h0_bits, block_hinf_bits)
+        };
+
+        // C_A: h0_bits booleanity
+        for i in 0..128 {
+            let bit = &h0_bits[i];
+            b.assert_eq(is_first.clone() * (bit.clone() * bit.clone() + bit.clone()), zero);
+        }
+
+        // C_B: h_inf_bits booleanity
+        for i in 0..128 {
+            let bit = &h_inf_bits[i];
+            b.assert_eq(is_first.clone() * (bit.clone() * bit.clone() + bit.clone()), zero);
+        }
+
+        // C_C: block bits 10..26 == h0_bits (byte-aligned binding)
+        for i in 0..128 {
+            b.assert_eq(
+                is_first.clone() * (block_h0_bits[i].clone() + h0_bits[i].clone()),
+                zero,
+            );
+        }
+
+        // C_D: block bits 26..42 == h_inf_bits
+        for i in 0..128 {
+            b.assert_eq(
+                is_first.clone() * (block_hinf_bits[i].clone() + h_inf_bits[i].clone()),
+                zero,
+            );
+        }
+
+        // C_E: sum(h0_bits[i] * X_i) == COL_H0  (bit pattern reconstruction)
+        let mut recon_h0: AB::Expr = zero.into();
+        for i in 0..128 {
+            let x_i_f: AB::F = AB::F::from_le_bytes((1u128 << i).to_le_bytes());
+            let x_i: AB::Expr = x_i_f.into();
+            recon_h0 = recon_h0 + h0_bits[i].clone() * x_i;
+        }
+        b.assert_eq(is_first.clone() * (recon_h0 + h0), zero);
+
+        // C_F: sum(h_inf_bits[i] * X_i) == COL_H_INF
+        let mut recon_hinf: AB::Expr = zero.into();
+        for i in 0..128 {
+            let x_i_f: AB::F = AB::F::from_le_bytes((1u128 << i).to_le_bytes());
+            let x_i: AB::Expr = x_i_f.into();
+            recon_hinf = recon_hinf + h_inf_bits[i].clone() * x_i;
+        }
+        b.assert_eq(is_first.clone() * (recon_hinf + h_inf), zero);
+    }
+}
+
+#[cfg(test)]
+mod tests_with_bits {
+    use super::*;
+
+    type F = BinaryField128;
+
+    #[test]
+    fn layout_with_bits_constants() {
+        assert_eq!(COL_H0_BITS_BASE, WIDTH);
+        assert_eq!(COL_HINF_BITS_BASE, WIDTH + 128);
+        assert_eq!(WIDTH_WITH_BITS, WIDTH + 256);
+    }
+
+    #[test]
+    fn width_and_public_match_base() {
+        let air = Blake3TranscriptAirWithBits;
+        assert_eq!(<Blake3TranscriptAirWithBits as BaseAir<F>>::width(&air), WIDTH_WITH_BITS);
+        assert_eq!(<Blake3TranscriptAirWithBits as BaseAir<F>>::num_public_values(&air), NUM_PUBLIC);
+        assert_eq!(WIDTH_WITH_BITS, 11796);
+    }
+
+    #[test]
+    fn bit_columns_are_contiguous() {
+        // h0_bits occupy [COL_H0_BITS_BASE, COL_H0_BITS_BASE + 128)
+        // h_inf_bits occupy [COL_HINF_BITS_BASE, COL_HINF_BITS_BASE + 128)
+        assert_eq!(COL_H0_BITS_BASE + 128, COL_HINF_BITS_BASE);
+        assert_eq!(COL_HINF_BITS_BASE + 128, WIDTH_WITH_BITS);
+    }
+
+    #[test]
+    fn reconstruction_constants_are_powers_of_two() {
+        // Sanity: X_i = 2^i as field element
+        for i in [0u32, 1, 7, 63, 127].iter() {
+            let x = BinaryField128::from_le_bytes((1u128 << i).to_le_bytes());
+            // Verify byte pattern: only byte i/8 has bit i%8 set
+            let bytes: [u8; 16] = unsafe { core::mem::transmute_copy(&x) };
+            let byte_idx = (*i as usize) / 8;
+            let bit_in_byte = (*i as usize) % 8;
+            assert_eq!(bytes[byte_idx], 1u8 << bit_in_byte);
+        }
+    }
+}
