@@ -301,6 +301,10 @@ name = "t1_4c_s7_tree_agg"
 path = "tests/t1_4c_s7_tree_agg.rs"
 
 [[test]]
+name = "t1_4c_s7_v2_real"
+path = "tests/t1_4c_s7_v2_real.rs"
+
+[[test]]
 name = "t1_4c_iso_p2b"
 path = "tests/t1_4c_iso_p2b.rs"
 
