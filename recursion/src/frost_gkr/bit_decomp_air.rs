@@ -59,42 +59,44 @@ impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for BitDecompAir {
     fn eval(&self, b: &mut AB) {
         let zero = AB::F::ZERO;
 
-        let main = b.main();
-        let cur = main.current_slice();
+        // Extract bits + is_real from main in one borrow scope
+        let (bits, is_real): (Vec<AB::Expr>, AB::Expr) = {
+            let main = b.main();
+            let cur = main.current_slice();
+            let bits: Vec<AB::Expr> = (0..BITS).map(|i| cur[i].into()).collect();
+            let is_real: AB::Expr = cur[COL_IS_REAL].into();
+            (bits, is_real)
+        };
 
-        // C0: booleanity on all 128 bits (only on is_real rows)
-        let is_real: AB::Expr = cur[COL_IS_REAL].into();
+        // C0: is_real booleanity
         b.assert_eq(is_real.clone() * is_real.clone() + is_real.clone(), zero);
 
+        // C1: bit booleanity (gated by is_real)
         for i in 0..BITS {
-            let bit: AB::Expr = cur[i].into();
+            let bit = &bits[i];
             let bit_sq = bit.clone() * bit.clone();
-            // is_real * (bit^2 + bit) = 0  --> bit in {0,1} when is_real
-            b.assert_eq(is_real.clone() * (bit_sq + bit), zero);
+            b.assert_eq(is_real.clone() * (bit_sq + bit.clone()), zero);
         }
 
-        // C2: byte-level reconstruction.
-        //
-        // Key property: `blk_to_le_bytes` shows BF128 stored as u128.
-        // Adding two field elements = XOR of bit patterns.
-        // So: field_from_le_bytes(a) + field_from_le_bytes(b) = field_from_le_bytes(a XOR b).
-        //
-        // Therefore: sum_i bit_i * from_le_bytes(2^i) = from_le_bytes(sum_i bit_i * 2^i)
-        //            = from_le_bytes(u128_with_bit_i_set_where_bit_i=1)
-        //            = from_le_bytes(to_repr(public[0]))
-        //            = public[0]
-        //
-        // Constraint: is_real * (reconstructed + public[0]) = 0 (char 2, + is XOR)
-        let mut reconstructed: AB::Expr = AB::F::ZERO.into();
+        // C2a: is_first_row → is_real = 1
+        // Forces at least one real decomposition row.
+        let is_first: AB::Expr = b.is_first_row().into();
+        let one_expr: AB::Expr = AB::F::ONE.into();
+        b.assert_eq(is_first * (is_real.clone() + one_expr), zero);
+
+        // C2b: is_real → sum_i(bit_i * X_i) = public[0]
+        // where X_i = from_le_bytes(1u128 << i) as a field element.
+        // Field addition = XOR of bit patterns, so summing single-bit
+        // contributions reproduces the original u128 bit pattern.
+        let mut reconstructed: AB::Expr = zero.into();
         for i in 0..BITS {
-            let bit: AB::Expr = cur[i].into();
-            let basis_bytes = (1u128 << i).to_le_bytes();
-            let basis_f = BinaryField128::from_le_bytes(basis_bytes);
-            let basis: AB::Expr = basis_f.into();
-            reconstructed = reconstructed + bit * basis;
+            let bit = &bits[i];
+            let x_i_f: AB::F = AB::F::from_le_bytes((1u128 << i).to_le_bytes());
+            let x_i_expr: AB::Expr = x_i_f.into();
+            reconstructed = reconstructed + bit.clone() * x_i_expr;
         }
         let pub_val: AB::Expr = b.public_values()[0].into();
-        b.assert_eq(is_real.clone() * (reconstructed + pub_val), zero);
+        b.assert_eq(is_real * (reconstructed + pub_val), zero);
     }
 }
 
@@ -102,22 +104,24 @@ impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for BitDecompAir {
 mod tests {
     use super::*;
     use p3_air::check_constraints;
+    use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
 
     type F = BinaryField128;
 
-    fn blk(n: u128) -> F { F::from_le_bytes(n.to_le_bytes()) }
-
-    fn build_valid_trace() -> (RowMajorMatrix<F>, Vec<F>) {
-        // Single row, is_real=1, bits match public value.
-        let value: u128 = 0xAAAA_BBBB_CCCC_DDDD;
-        let mut values = vec![F::ZERO; WIDTH];
-        for i in 0..BITS {
-            values[i] = if (value >> i) & 1 == 1 { F::ONE } else { F::ZERO };
+    fn build_trace(value: u128) -> (RowMajorMatrix<F>, Vec<F>) {
+        // Row 0: real decomposition (is_real=1)
+        // Row 1: padding (is_real=0)
+        let mut values = vec![F::ZERO; 2 * WIDTH];
+        for i in 0..128 {
+            if (value >> i) & 1 == 1 {
+                values[i] = F::ONE;
+            }
         }
         values[COL_IS_REAL] = F::ONE;
-        let public_val = BinaryField128::from_le_bytes(value.to_le_bytes());
-        (RowMajorMatrix::new(values, WIDTH), vec![public_val])
+
+        let public = vec![F::from_le_bytes(value.to_le_bytes())];
+        (RowMajorMatrix::new(values, WIDTH), public)
     }
 
     fn expect_reject<F2: FnOnce()>(f: F2, msg: &str) {
@@ -126,56 +130,86 @@ mod tests {
     }
 
     #[test]
-    fn layout_constants() {
+    fn layout_constants_c2() {
+        assert_eq!(BITS, 128);
+        assert_eq!(COL_IS_REAL, 128);
         assert_eq!(WIDTH, 129);
         assert_eq!(NUM_PUBLIC, 1);
-        assert_eq!(COL_IS_REAL, 128);
     }
 
     #[test]
-    fn valid_trace_passes() {
-        let (trace, public) = build_valid_trace();
+    fn valid_decomposition_passes() {
+        let v: u128 = 0x123456789ABCDEF0123456789ABCDEF0;
+        let (trace, public) = build_trace(v);
         check_constraints(&BitDecompAir, &trace, &public);
     }
 
     #[test]
+    fn zero_value_passes() {
+        let (trace, public) = build_trace(0);
+        check_constraints(&BitDecompAir, &trace, &public);
+    }
+
+    #[test]
+    fn max_value_passes() {
+        let (trace, public) = build_trace(u128::MAX);
+        check_constraints(&BitDecompAir, &trace, &public);
+    }
+
+    #[test]
+    fn single_bit_passes() {
+        let (trace, public) = build_trace(1);
+        check_constraints(&BitDecompAir, &trace, &public);
+    }
+
+    #[test]
+    fn high_bit_passes() {
+        let (trace, public) = build_trace(1u128 << 127);
+        check_constraints(&BitDecompAir, &trace, &public);
+    }
+
+    #[test]
+    fn tampered_bit_rejected() {
+        let v: u128 = 0x123456789ABCDEF0123456789ABCDEF0;
+        let (mut trace, public) = build_trace(v);
+        trace.values[0] = if trace.values[0] == F::ONE { F::ZERO } else { F::ONE };
+        expect_reject(
+            || check_constraints(&BitDecompAir, &trace, &public),
+            "tampered bit must fail C2b",
+        );
+    }
+
+    #[test]
+    fn no_is_real_on_first_row_rejected() {
+        let v: u128 = 0xABCD;
+        let (mut trace, public) = build_trace(v);
+        trace.values[COL_IS_REAL] = F::ZERO;
+        expect_reject(
+            || check_constraints(&BitDecompAir, &trace, &public),
+            "is_real=0 on first row must fail C2a",
+        );
+    }
+
+    #[test]
+    fn tampered_public_rejected() {
+        let v: u128 = 0xABCD;
+        let (trace, mut public) = build_trace(v);
+        public[0] = public[0] + F::ONE;
+        expect_reject(
+            || check_constraints(&BitDecompAir, &trace, &public),
+            "tampered public must fail C2b",
+        );
+    }
+
+    #[test]
     fn non_boolean_bit_rejected() {
-        let (mut trace, public) = build_valid_trace();
-        trace.values[5] = blk(99);  // bit 5 not boolean
+        let v: u128 = 0;
+        let (mut trace, public) = build_trace(v);
+        // Set a bit to 2 (not boolean)
+        trace.values[5] = F::from_le_bytes(2u128.to_le_bytes());
         expect_reject(
             || check_constraints(&BitDecompAir, &trace, &public),
-            "non-boolean bit must fail C0",
-        );
-    }
-
-    #[test]
-    fn non_boolean_flag_rejected() {
-        let (mut trace, public) = build_valid_trace();
-        trace.values[COL_IS_REAL] = blk(99);
-        expect_reject(
-            || check_constraints(&BitDecompAir, &trace, &public),
-            "non-boolean is_real must fail booleanity",
-        );
-    }
-
-    #[test]
-    fn wrong_public_rejected() {
-        let (trace, mut public) = build_valid_trace();
-        public[0] = public[0] + F::ONE;  // change expected value
-        expect_reject(
-            || check_constraints(&BitDecompAir, &trace, &public),
-            "wrong public value must fail C2",
-        );
-    }
-
-    #[test]
-    fn flipped_bit_rejected() {
-        let (mut trace, public) = build_valid_trace();
-        // Flip bit 10 -- breaks reconstruction
-        trace.values[10] = if trace.values[10] == F::ONE { F::ZERO } else { F::ONE };
-        expect_reject(
-            || check_constraints(&BitDecompAir, &trace, &public),
-            "flipped bit must fail C2",
+            "non-boolean bit must fail C1",
         );
     }
 }
