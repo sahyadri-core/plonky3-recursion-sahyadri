@@ -355,10 +355,27 @@ fn build_merkle_path_for_leaf(lo_values: &[F], leaf_index: usize) -> Vec<(F, F, 
 /// Build producer trace for Poseidon2bBusAir from a single (left, right) input.
 fn build_poseidon2b_producer_trace(left: F, right: F, domain: F) -> RowMajorMatrix<F> {
     let state_in = [left, right, F::ZERO, domain];
-    // CRITICAL: Poseidon2bAir requires full 68-row trace (N_STATES = 66 rounds + 2).
-    // Truncating to 2 rows breaks internal round constraints (rows 2..67 must be
-    // populated by the permutation). Do NOT pad/truncate.
-    p3_poseidon2b::generate_poseidon2b_trace(state_in)
+    // `generate_poseidon2b_trace` returns 1 row × 1024 cols: all 68 states live as
+    // column groups within a single row. Poseidon2bAir has NO row-to-row
+    // transitions — all round constraints compare column groups within one row.
+    //
+    // MultiStark uses "repeat-last successor convention": the last row's successor
+    // is itself, and `is_last_row()` fires on the trace's final row. Zero-padding
+    // breaks this (bus push would emit (0,0,0) on a pad row) AND contradicts
+    // bus balance against MerklePath pulls.
+    //
+    // Correct approach (mirrors phase3d2d_combined): replicate the single valid
+    // permutation row to 32 rows × 1024 cols = 32768 cells = arity 15. All rows
+    // are valid, so bus push on the final row emits the real compression tuple.
+    let base_trace = p3_poseidon2b::generate_poseidon2b_trace(state_in);
+    let base_values = base_trace.values;
+    const TARGET_ROWS: usize = 32;
+    const P2B_WIDTH: usize = 1024;
+    let mut values = Vec::with_capacity(TARGET_ROWS * P2B_WIDTH);
+    for _ in 0..TARGET_ROWS {
+        values.extend_from_slice(&base_values);
+    }
+    RowMajorMatrix::new(values, P2B_WIDTH)
 }
 
 fn build_poseidon2b_producer_public(left: F, right: F, domain: F) -> Vec<F> {

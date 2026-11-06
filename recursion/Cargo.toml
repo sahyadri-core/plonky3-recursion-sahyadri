@@ -293,6 +293,14 @@ name = "t1_4c_s4_sub3_merkle_wire"
 path = "tests/t1_4c_s4_sub3_merkle_wire.rs"
 
 [[test]]
+name = "t1_4c_s5_combined"
+path = "tests/t1_4c_s5_combined.rs"
+
+[[test]]
+name = "t1_4c_iso_p2b"
+path = "tests/t1_4c_iso_p2b.rs"
+
+[[test]]
 name = "s1_pathb_recursive_compose"
 path = "tests/s1_pathb_recursive_compose.rs"
 
