@@ -1,21 +1,36 @@
-//! ⚠️ SESSION 5 WIP — NOT RUNNABLE
+//! ⚠️ SESSION 5 WIP — v2 FAILED (2026-11-06)
 //!
-//! Status: FAILED with `Zerocheck(FinalSumMismatch)` at verify time.
+//! ## Attempts
+//! - v1: generic `pad_trace()` for SC → `Zerocheck(FinalSumMismatch)`
+//! - v2: custom SC padding (final_sum carry-through) → SAME error
 //!
-//! Root cause: SC trace padding breaks the sumcheck invariant.
-//! The `pad_trace()` helper pads rows with zeros, but CompressedSumcheckAir
-//! expects the final row's `running_out` to equal the public claimed sum.
-//! Padded rows have running_out=0 ≠ claimed → zerocheck fails.
+//! ## Runtime per attempt
+//! 577s prove + verify failure = ~10 min per iteration. Expensive.
 //!
-//! Fix required (Session 5 v2):
-//!   - Padding-aware SC trace: set padding rows to
-//!     running_in == running_out == last_real_running_out
-//!   - OR increase real SC rounds until natural arity >= 15
-//!   - OR lower MIN_TRACE_CELLS if MultiStark allows (check arity constraint)
+//! ## Hypotheses (unresolved)
+//! A. Session 4 ("Sub-3 PASS" comment) may also fail at 9 levels — never confirmed end-to-end.
+//!    In that case SC addition is not the culprit; S4 baseline is broken.
+//! B. MP AIR's depth-specific constraint (if any) violated at 2 levels vs 9.
+//! C. SC's unconstrained `alpha` column interacts badly with combined proof's
+//!    random evaluation. See sumcheck_verifier_air.rs:NOT YET DONE section.
+//! D. P2B padding (if trace had to be padded — was NOT in S4 with 68 rows × 1024 W = 69632 > 32768 MIN_TRACE_CELLS).
 //!
-//! Runtime for v1: 577s prove (mostly wasted — proof invalid).
+//! ## Next session debug plan
+//! 1. Run `t1_4c_s4_sub3_merkle_wire` (9 levels) in background — see if it PASSES or has same error.
+//!    - If S4 fails → padding issue predates SC, not SC-specific.
+//!    - If S4 passes → SC/level-specific issue, isolate further.
+//! 2. Create `t1_4c_s5_isolated_sc.rs`: SC-only padded trace in MultiStark (no V2/MP/P2B).
+//!    - Prove+verify single AIR. Fast (~1-2 min). If fails → SC padding broken.
+//! 3. Create `t1_4c_s5_isolated_mp.rs`: MP-only padded trace in MultiStark.
+//!    - If fails at 2 levels → MP needs >= depth 3 or similar constraint.
 //!
-//! DO NOT run in CI. Session 4 (t1_4c_s4_sub3_merkle_wire) is the working baseline.
+//! ## Realistic timeline update
+//! T1.4c is a multi-week research track. 3 hours today revealed:
+//!   - S1-S2: worked (source proof + V2)
+//!   - S4: unverified end-to-end at 9 levels (10 min run, no completion seen)
+//!   - S5: failed at both padding strategies
+//! Next session (S5 debugging): ~4-6 hours focused work.
+
 
 //! T1.4c Session 4: Sub-3 Merkle path verified via Poseidon2b bus.
 //!
@@ -494,8 +509,41 @@ fn t1_4c_s5_with_sumcheck() {
     let p2b_width = <p3_recursion::frost_gkr::poseidon2b_bus_air::Poseidon2bBusAir as BaseAir<BinaryField128>>::width(
         &p3_recursion::frost_gkr::poseidon2b_bus_air::Poseidon2bBusAir
     );
-    // SC padded trace for arity calc
-    let sc_t_padded = pad_trace(sc_t.clone());
+    // SC padded trace with sumcheck-correct padding (C2/C5/C6 safe)
+    // Non-last rows: h0=final_sum, h_inf=0, alpha=0, claimed=next_claimed=final_sum
+    // Last row: is_last=1, next_claimed=final_sum (satisfies C6)
+    // Last real row: is_last cleared to 0 (satisfies C2 only at final row)
+    let final_sum = sc_p[1];
+    let sc_t_padded = {
+        let trace = sc_t.clone();
+        let w = trace.width();
+        let h = trace.height();
+        let cells = h * w;
+        if cells >= MIN_TRACE_CELLS {
+            trace
+        } else {
+            let target_rows = (MIN_TRACE_CELLS / w + 1).next_power_of_two().max(h);
+            let mut vals = trace.values.clone();
+            vals.resize(target_rows * w, F::ZERO);
+
+            // Clear is_last on last real row (it's no longer the last row)
+            if h < target_rows && h > 0 {
+                vals[(h - 1) * w + SC_IS_LAST] = F::ZERO;
+            }
+
+            // Padding rows: carry-through of final_sum
+            for r in h..target_rows {
+                vals[r * w + SC_H0] = final_sum;
+                vals[r * w + SC_H_INF] = F::ZERO;
+                vals[r * w + SC_ALPHA] = F::ZERO;
+                vals[r * w + SC_CLAIMED] = final_sum;
+                vals[r * w + SC_NEXT] = final_sum;
+                vals[r * w + SC_IS_FIRST] = F::ZERO;
+                vals[r * w + SC_IS_LAST] = if r == target_rows - 1 { F::ONE } else { F::ZERO };
+            }
+            RowMajorMatrix::new(vals, w)
+        }
+    };
     let sc_rows = sc_t_padded.height();
     let sc_rows_log = (sc_rows as f64).log2().ceil() as usize;
 
