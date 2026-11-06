@@ -386,7 +386,7 @@ fn build_poseidon2b_producer_public(left: F, right: F, domain: F) -> Vec<F> {
 
 #[test]
 #[ignore]
-fn t1_4c_s5_with_sumcheck() {
+fn t1_4c_s5_fast() {
     use std::time::Instant;
     let start = Instant::now();
 
@@ -529,8 +529,8 @@ fn t1_4c_s5_with_sumcheck() {
         total_cells += t.height() * p2b_width;
     }
     let comb_arity = (total_cells.next_power_of_two().trailing_zeros() as usize).max(15);
-    println!("Padded: V2 {}x{}, MP {}x{}, {} P2B producers",
-        v2_rows, V2_WIDTH, mp_rows, MP_WIDTH, p2b_traces.len());
+    println!("Padded: V2 {}x{}, SC {}x{}, MP {}x{}, {} P2B producers",
+        v2_rows, V2_WIDTH, sc_rows, SC_WIDTH, mp_rows, MP_WIDTH, p2b_traces.len());
     println!("Total cells: {}, combined arity: {}", total_cells, comb_arity);
     let comb_pcs = build_pcs(comb_arity);
     let comb_cfg = CombCfg { pcs: comb_pcs };
@@ -609,7 +609,239 @@ fn t1_4c_s5_with_sumcheck() {
         .expect("Combined Merkle path proof must verify");
     println!("COMBINED VERIFY: {:?}", start_v.elapsed());
 
-    println!("\n=== Session 4 PASS: Sub-3 Merkle path wire working ===");
+    println!("\n=== Session 5 PASS: V2 + SumcheckVerifier + MerklePath + Poseidon2b in one MultiStark ===");
+    println!("Total time: {:?}", start.elapsed());
+    println!("\nHONEST: Merkle path verified in-circuit via Poseidon2b bus.");
+    println!("V2 fold relations proven (from S3). Poseidon2b producers match.");
+    println!("Sub-3 foundation ready. Full RecursiveVerifierAir = Session 9.");
+}
+
+#[test]
+#[ignore]
+fn t1_4c_s5_full_scale() {
+    use std::time::Instant;
+    let start = Instant::now();
+
+    // ===== 1. Generate source proof (Poseidon2b) =====
+    println!("=== Generating source proof (SC + FRI, Poseidon2b) ===");
+    let (sc_t, sc_p) = build_sc_trace();
+    let (fri_t, fri_p) = build_fri_trace();
+    let src_raw = 2 * SC_WIDTH + 4 * FRI_WIDTH;
+    let src_arity = src_raw.next_power_of_two().trailing_zeros() as usize;
+    let src_cfg = SrcCfg { pcs: build_pcs(src_arity) };
+    let sc_air = SrcAir::SumcheckVerifier;
+    let fri_air = SrcAir::FriVerifier;
+
+    let mut ch_s = make_ch();
+    let (pk, vk) = setup(&src_cfg, &[&sc_air, &fri_air], &mut ch_s).unwrap();
+    let sc_i = ProverInstance::new(&sc_air, Table::new(sc_t.clone().transpose()), &pk, &sc_p);
+    let fri_i = ProverInstance::new(&fri_air, Table::new(fri_t.transpose()), &pk, &fri_p);
+    let mut ch_p = make_ch();
+    let proof = prove(&src_cfg, ProverInstances::new(vec![sc_i, fri_i]), 0, &mut ch_p).unwrap();
+    println!("Source proof: {:?}", start.elapsed());
+
+    // ===== 2. Extract V2 + Merkle path =====
+    let _ = take_last_indices();
+    let _ = take_last_betas_bytes();
+    let verif = vec![
+        VerifierInstance::new(&sc_air, &vk, 1, &sc_p),
+        VerifierInstance::new(&fri_air, &vk, 2, &fri_p),
+    ];
+    let mut ch_v = make_ch();
+    verify(&src_cfg, VerifierInstances::new(verif), &proof, 0, &mut ch_v).unwrap();
+    println!("Source verify: {:?}", start.elapsed());
+
+    let indices = take_last_indices().unwrap();
+    let betas_bytes = take_last_betas_bytes().unwrap();
+    let betas: Vec<F> = betas_bytes.iter().map(|b| {
+        let mut arr = [0u8; 16];
+        arr.copy_from_slice(&b[..16]);
+        F::from_le_bytes(arr)
+    }).collect();
+
+    let v2_trace = build_v2_trace_from_real(&proof, &indices, &betas);
+    let v2_rows = v2_trace.height();
+    println!("V2: {}x{}", v2_rows, V2_WIDTH);
+
+    // Extract V2 lo values as Merkle leaves
+    let v2_lo: Vec<F> = (0..v2_rows)  // FULL: 512 rows → 9 levels
+        .map(|r| v2_trace.values[r * V2_WIDTH + COL_LO])
+        .collect();
+    let merkle_path = build_merkle_path_for_leaf(&v2_lo, 0);
+    println!("Merkle path: {} levels", merkle_path.len());
+
+    // ===== 3. Build MerklePath trace =====
+    let mp_rows = merkle_path.len().next_power_of_two().max(2);
+    let mut mp_values = vec![F::ZERO; mp_rows * MP_WIDTH];
+    for (i, (curr, sib, parent)) in merkle_path.iter().enumerate() {
+        mp_values[i * MP_WIDTH + MP_COL_CURR] = *curr;
+        mp_values[i * MP_WIDTH + MP_COL_SIB] = *sib;
+        mp_values[i * MP_WIDTH + MP_COL_PARENT] = *parent;
+        mp_values[i * MP_WIDTH + MP_COL_IS_REAL] = F::ONE;  // MARK REAL
+    }
+    // Padding rows: is_real=0 (no Pull)
+    let mp_trace = RowMajorMatrix::new(mp_values, MP_WIDTH);
+
+    // ===== 4. Build Poseidon2b producers (one per Merkle level) =====
+    let mut p2b_traces = Vec::new();
+    let mut p2b_publics = Vec::new();
+    for (curr, sib, _parent) in &merkle_path {
+        let producer_trace = build_poseidon2b_producer_trace(*curr, *sib, blk(MERKLE_DOMAIN));
+        p2b_traces.push(producer_trace);
+        p2b_publics.push(build_poseidon2b_producer_public(*curr, *sib, blk(MERKLE_DOMAIN)));
+    }
+    println!("Poseidon2b producers: {}", p2b_traces.len());
+
+    // ===== 5. Combine: V2 + MerklePath + Poseidon2b producers =====
+    // CRITICAL: MultiStark requires EACH individual trace's arity >= floor (15 here).
+    // A trace's arity = log2(next_pow2(rows * cols)). Must be >= 15.
+    // So each trace needs >= 2^15 = 32768 cells minimum.
+    const MIN_TRACE_CELLS: usize = 1 << 15;  // 32768
+    let pad_trace = |trace: RowMajorMatrix<F>| -> RowMajorMatrix<F> {
+        let w = trace.width();
+        let h = trace.height();
+        let cells = h * w;
+        if cells >= MIN_TRACE_CELLS { return trace; }
+        let target_rows = (MIN_TRACE_CELLS / w + 1).next_power_of_two().max(h);
+        let mut vals = trace.values.clone();
+        vals.resize(target_rows * w, F::ZERO);
+        RowMajorMatrix::new(vals, w)
+    };
+
+    let v2_trace = pad_trace(v2_trace);
+    let mp_trace = pad_trace(mp_trace);
+    let p2b_traces: Vec<_> = p2b_traces.into_iter().map(pad_trace).collect();
+
+    let v2_rows = v2_trace.height();
+    let mp_rows = mp_trace.height();
+
+    let p2b_width = <p3_recursion::frost_gkr::poseidon2b_bus_air::Poseidon2bBusAir as BaseAir<BinaryField128>>::width(
+        &p3_recursion::frost_gkr::poseidon2b_bus_air::Poseidon2bBusAir
+    );
+    // SC padded trace with sumcheck-correct padding (C2/C5/C6 safe)
+    // Non-last rows: h0=final_sum, h_inf=0, alpha=0, claimed=next_claimed=final_sum
+    // Last row: is_last=1, next_claimed=final_sum (satisfies C6)
+    // Last real row: is_last cleared to 0 (satisfies C2 only at final row)
+    let final_sum = sc_p[1];
+    let sc_t_padded = {
+        let trace = sc_t.clone();
+        let w = trace.width();
+        let h = trace.height();
+        let cells = h * w;
+        if cells >= MIN_TRACE_CELLS {
+            trace
+        } else {
+            let target_rows = (MIN_TRACE_CELLS / w + 1).next_power_of_two().max(h);
+            let mut vals = trace.values.clone();
+            vals.resize(target_rows * w, F::ZERO);
+
+            // Clear is_last on last real row (it's no longer the last row)
+            if h < target_rows && h > 0 {
+                vals[(h - 1) * w + SC_IS_LAST] = F::ZERO;
+            }
+
+            // Padding rows: carry-through of final_sum
+            for r in h..target_rows {
+                vals[r * w + SC_H0] = final_sum;
+                vals[r * w + SC_H_INF] = F::ZERO;
+                vals[r * w + SC_ALPHA] = F::ZERO;
+                vals[r * w + SC_CLAIMED] = final_sum;
+                vals[r * w + SC_NEXT] = final_sum;
+                vals[r * w + SC_IS_FIRST] = F::ZERO;
+                vals[r * w + SC_IS_LAST] = if r == target_rows - 1 { F::ONE } else { F::ZERO };
+            }
+            RowMajorMatrix::new(vals, w)
+        }
+    };
+    let sc_rows = sc_t_padded.height();
+    let sc_rows_log = (sc_rows as f64).log2().ceil() as usize;
+
+    let mut total_cells = v2_rows * V2_WIDTH + mp_rows * MP_WIDTH + sc_rows * SC_WIDTH;
+    for t in &p2b_traces {
+        total_cells += t.height() * p2b_width;
+    }
+    let comb_arity = (total_cells.next_power_of_two().trailing_zeros() as usize).max(15);
+    println!("Padded: V2 {}x{}, SC {}x{}, MP {}x{}, {} P2B producers",
+        v2_rows, V2_WIDTH, sc_rows, SC_WIDTH, mp_rows, MP_WIDTH, p2b_traces.len());
+    println!("Total cells: {}, combined arity: {}", total_cells, comb_arity);
+    let comb_pcs = build_pcs(comb_arity);
+    let comb_cfg = CombCfg { pcs: comb_pcs };
+
+    // AIR list: 1 V2 + 1 MerklePath + N Poseidon2b producers
+    let mut airs: Vec<CombinedAir> = Vec::new();
+    airs.push(CombinedAir::V2);
+    airs.push(CombinedAir::SumcheckVerifier);  // Session 5: NEW
+    airs.push(CombinedAir::MerklePath);
+    for _ in 0..p2b_traces.len() {
+        airs.push(CombinedAir::Poseidon2b);
+    }
+    let air_refs: Vec<&CombinedAir> = airs.iter().collect();
+
+    let mut ch_cs = make_ch();
+    let (comb_pk, comb_vk) = setup(&comb_cfg, &air_refs, &mut ch_cs).unwrap();
+    println!("Combined setup OK");
+
+    // Build instances
+    let mut instances = Vec::new();
+
+    // V2 instance
+    instances.push(ProverInstance::new(
+        &airs[0], Table::new(v2_trace.transpose()), &comb_pk, &[],
+    ));
+
+    // SC instance (Session 5)
+    instances.push(ProverInstance::new(
+        &airs[1], Table::new(sc_t_padded.transpose()), &comb_pk, &sc_p,
+    ));
+
+    // MerklePath instance (shifted to index 2)
+    instances.push(ProverInstance::new(
+        &airs[2], Table::new(mp_trace.transpose()), &comb_pk, &[],
+    ));
+
+    // Poseidon2b producer instances
+    for i in 0..p2b_traces.len() {
+        instances.push(ProverInstance::new(
+            &airs[3 + i],
+            Table::new(p2b_traces[i].transpose()),
+            &comb_pk,
+            &p2b_publics[i],
+        ));
+    }
+
+    let mut ch_prove = make_ch();
+    let start_prove = Instant::now();
+    let comb_proof = prove(&comb_cfg, ProverInstances::new(instances), 0, &mut ch_prove).unwrap();
+    println!("COMBINED PROVE: {:?}, ~{}B",
+        start_prove.elapsed(), core::mem::size_of_val(&comb_proof));
+
+    // ===== 6. Verify =====
+    let mut verif_insts = Vec::new();
+    verif_insts.push(VerifierInstance::new(
+        &airs[0], &comb_vk, v2_rows.trailing_zeros() as usize, &[],
+    ));
+    verif_insts.push(VerifierInstance::new(
+        &airs[1], &comb_vk, sc_rows_log, &sc_p,
+    ));
+    verif_insts.push(VerifierInstance::new(
+        &airs[2], &comb_vk, mp_rows.trailing_zeros() as usize, &[],
+    ));
+    for i in 0..p2b_traces.len() {
+        verif_insts.push(VerifierInstance::new(
+            &airs[3 + i],
+            &comb_vk,
+            p2b_traces[i].height().trailing_zeros() as usize,
+            &p2b_publics[i],
+        ));
+    }
+
+    let mut ch_vv = make_ch();
+    let start_v = Instant::now();
+    verify(&comb_cfg, VerifierInstances::new(verif_insts), &comb_proof, 0, &mut ch_vv)
+        .expect("Combined Merkle path proof must verify");
+    println!("COMBINED VERIFY: {:?}", start_v.elapsed());
+
+    println!("\n=== Session 5 PASS: V2 + SumcheckVerifier + MerklePath + Poseidon2b in one MultiStark ===");
     println!("Total time: {:?}", start.elapsed());
     println!("\nHONEST: Merkle path verified in-circuit via Poseidon2b bus.");
     println!("V2 fold relations proven (from S3). Poseidon2b producers match.");
