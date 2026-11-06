@@ -510,3 +510,165 @@ mod tests_with_bits {
         }
     }
 }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// S8 Phase 3: Full valid-trace test with real Blake3 compression
+// ═══════════════════════════════════════════════════════════════════
+//
+// Proves C_A..C_F pass with REAL Blake3 data:
+// - h0, h_inf are chosen field elements
+// - Their 16-byte arrays are embedded in Blake3 block bytes 10..26 / 26..42
+// - Blake3 compression runs on these bytes
+// - h0_bits/h_inf_bits reconstruct to COL_H0/COL_H_INF
+// - check_constraints validates all 6 constraint families
+
+#[cfg(test)]
+mod tests_phase3_full {
+    use super::*;
+    use p3_air::check_constraints;
+    use p3_blake3_air::{Blake3CompressionInput, generate_binary_trace_rows};
+    use p3_field::PrimeCharacteristicRing;
+    use p3_matrix::dense::RowMajorMatrix;
+    use p3_matrix::Matrix;
+
+    type F = BinaryField128;
+
+    /// Build a full WIDTH_WITH_BITS trace from a real Blake3 compression.
+    fn build_full_trace(h0: F, h_inf: F, alpha: F) -> RowMajorMatrix<F> {
+        let h0_bytes: [u8; 16] = unsafe { core::mem::transmute_copy(&h0) };
+        let h_inf_bytes: [u8; 16] = unsafe { core::mem::transmute_copy(&h_inf) };
+        let h0_u128: u128 = unsafe { core::mem::transmute_copy(&h0) };
+        let hinf_u128: u128 = unsafe { core::mem::transmute_copy(&h_inf) };
+
+        // Pack [u32; 16] block:
+        //   [0..10)   ROUND_POLY
+        //   [10..26)  h0_bytes
+        //   [26..42)  h_inf_bytes
+        //   [42..64)  zero padding
+        let mut block = [0u32; 16];
+        for i in 0..10 {
+            let word = i / 4;
+            let b_in = i % 4;
+            block[word] |= (ROUND_POLY_CONST[i] as u32) << (b_in * 8);
+        }
+        for i in 0..16 {
+            let byte_pos = 10 + i;
+            let word = byte_pos / 4;
+            let b_in = byte_pos % 4;
+            block[word] |= (h0_bytes[i] as u32) << (b_in * 8);
+        }
+        for i in 0..16 {
+            let byte_pos = 26 + i;
+            let word = byte_pos / 4;
+            let b_in = byte_pos % 4;
+            block[word] |= (h_inf_bytes[i] as u32) << (b_in * 8);
+        }
+
+        let input = Blake3CompressionInput {
+            chaining_value: IV_U32,
+            block,
+            counter: 0,
+            block_len: BLOCK_LEN_CONST,
+            flags: FLAGS_CONST,
+        };
+
+        let base = generate_binary_trace_rows::<F>(vec![input], 0);
+        let num_rows = base.height();
+        let b3_width = base.width();
+        assert_eq!(b3_width, BLAKE3_TRACE_COLS);
+
+        let mut values = vec![F::ZERO; num_rows * WIDTH_WITH_BITS];
+        for r in 0..num_rows {
+            for c in 0..b3_width {
+                values[r * WIDTH_WITH_BITS + c] = base.values[r * b3_width + c];
+            }
+            if r == 0 {
+                values[r * WIDTH_WITH_BITS + COL_H0] = h0;
+                values[r * WIDTH_WITH_BITS + COL_H_INF] = h_inf;
+                values[r * WIDTH_WITH_BITS + COL_ALPHA] = alpha;
+                for i in 0..128 {
+                    if (h0_u128 >> i) & 1 == 1 {
+                        values[r * WIDTH_WITH_BITS + COL_H0_BITS_BASE + i] = F::ONE;
+                    }
+                    if (hinf_u128 >> i) & 1 == 1 {
+                        values[r * WIDTH_WITH_BITS + COL_HINF_BITS_BASE + i] = F::ONE;
+                    }
+                }
+            }
+            if r == num_rows - 1 {
+                values[r * WIDTH_WITH_BITS + COL_IS_LAST] = F::ONE;
+            }
+        }
+        RowMajorMatrix::new(values, WIDTH_WITH_BITS)
+    }
+
+    fn test_h0() -> F {
+        F::from_le_bytes(0x0123456789ABCDEF_FEDCBA9876543210u128.to_le_bytes())
+    }
+    fn test_hinf() -> F {
+        F::from_le_bytes(0xFEDCBA9876543210_0123456789ABCDEFu128.to_le_bytes())
+    }
+    fn test_alpha() -> F {
+        F::from_le_bytes(0xDEADBEEF_CAFEBABE_12345678_9ABCDEF0u128.to_le_bytes())
+    }
+
+    fn expect_reject<F2: FnOnce()>(f: F2, msg: &str) {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        assert!(r.is_err(), "{}", msg);
+    }
+
+    #[test]
+    fn full_valid_trace_passes() {
+        let trace = build_full_trace(test_h0(), test_hinf(), test_alpha());
+        check_constraints(&Blake3TranscriptAirWithBits, &trace, &[]);
+        println!("PASS: full valid trace (real Blake3 + bits)");
+    }
+
+    #[test]
+    fn tampered_h0_bits_rejected() {
+        let mut trace = build_full_trace(test_h0(), test_hinf(), test_alpha());
+        // Flip one h0 bit on row 0
+        let idx = COL_H0_BITS_BASE + 0;
+        trace.values[idx] = if trace.values[idx] == F::ONE { F::ZERO } else { F::ONE };
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAirWithBits, &trace, &[]),
+            "tampered h0_bits must fail C_C/C_E",
+        );
+        println!("PASS: tampered h0_bits rejected");
+    }
+
+    #[test]
+    fn tampered_hinf_bits_rejected() {
+        let mut trace = build_full_trace(test_h0(), test_hinf(), test_alpha());
+        let idx = COL_HINF_BITS_BASE + 5;
+        trace.values[idx] = if trace.values[idx] == F::ONE { F::ZERO } else { F::ONE };
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAirWithBits, &trace, &[]),
+            "tampered h_inf_bits must fail C_D/C_F",
+        );
+        println!("PASS: tampered h_inf_bits rejected");
+    }
+
+    #[test]
+    fn tampered_col_h0_rejected() {
+        let mut trace = build_full_trace(test_h0(), test_hinf(), test_alpha());
+        trace.values[COL_H0] = trace.values[COL_H0] + F::ONE;
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAirWithBits, &trace, &[]),
+            "tampered COL_H0 must fail C_E",
+        );
+        println!("PASS: tampered COL_H0 rejected");
+    }
+
+    #[test]
+    fn tampered_col_hinf_rejected() {
+        let mut trace = build_full_trace(test_h0(), test_hinf(), test_alpha());
+        trace.values[COL_H_INF] = trace.values[COL_H_INF] + F::ONE;
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAirWithBits, &trace, &[]),
+            "tampered COL_H_INF must fail C_F",
+        );
+        println!("PASS: tampered COL_H_INF rejected");
+    }
+}
