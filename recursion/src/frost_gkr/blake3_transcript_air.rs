@@ -672,3 +672,237 @@ mod tests_phase3_full {
         println!("PASS: tampered COL_H_INF rejected");
     }
 }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// S8 Phase 4: Blake3TranscriptAirWithAlpha
+// ═══════════════════════════════════════════════════════════════════
+//
+// Constrains 128 new alpha_bits columns to equal Blake3 compression output.
+// alpha = first 16 bytes = output[0..4] as u32 LE
+// output[i] = v[i] ^ v[i+8]  for i < 8
+//   v[i]   = final a[i] = d1 ^ (d2 <<< 8)  from LAST_G_FOR_A[i]
+//   v[8+i] = final c[i] = b1 ^ (b2 <<< 7)  from LAST_G_FOR_C[i]
+//
+// LAST_G_FOR_A / LAST_G_FOR_C derived from G_SCHEDULE (see comment above)
+// G-cols offset within B3 trace (see Blake3BinaryGCols field order):
+//   add1_carries[31], d1[32], b1[32], add2_carries[31], d2[32], b2[32]
+
+pub const COL_ALPHA_BITS_BASE: usize = WIDTH_WITH_BITS;
+pub const WIDTH_WITH_ALPHA: usize = WIDTH_WITH_BITS + 128;
+
+const LAST_G_FOR_A: [usize; 4] = [4, 5, 6, 7];
+const LAST_G_FOR_C: [usize; 4] = [6, 7, 4, 5];
+
+const G_D1_OFFSET: usize = 31;
+const G_B1_OFFSET: usize = 63;
+const G_D2_OFFSET: usize = 126;
+const G_B2_OFFSET: usize = 158;
+const G_SIZE: usize = 190;
+const B3_NUM_ROUNDS_LOCAL: usize = 7;
+const B3_G_PER_ROUND_LOCAL: usize = 8;
+const B3_ROUNDS_START: usize = B3_FLAGS_OFFSET + 32;
+const B3_LAST_ROUND_START: usize =
+    B3_ROUNDS_START + (B3_NUM_ROUNDS_LOCAL - 1) * B3_G_PER_ROUND_LOCAL * G_SIZE;
+
+pub struct Blake3TranscriptAirWithAlpha;
+
+impl<F> BaseAir<F> for Blake3TranscriptAirWithAlpha {
+    fn width(&self) -> usize { WIDTH_WITH_ALPHA }
+    fn num_public_values(&self) -> usize { NUM_PUBLIC }
+}
+
+impl<AB: AirBuilder<F = BinaryField128>> Air<AB> for Blake3TranscriptAirWithAlpha {
+    fn eval(&self, b: &mut AB) {
+        Blake3TranscriptAirWithBits.eval(b);
+
+        let is_first: AB::Expr = b.is_first_row().into();
+        let zero = AB::F::ZERO;
+
+        let (alpha_bits, g_d1, g_b1, g_d2, g_b2, alpha_field) = {
+            let main = b.main();
+            let cur = main.current_slice();
+            let alpha_bits: Vec<AB::Expr> = (0..128)
+                .map(|i| cur[COL_ALPHA_BITS_BASE + i].into())
+                .collect();
+            let alpha_field: AB::Expr = cur[COL_ALPHA].into();
+            let zero_expr: AB::Expr = AB::F::ZERO.into();
+            let mut g_d1 = vec![vec![zero_expr.clone(); 32]; 8];
+            let mut g_b1 = vec![vec![zero_expr.clone(); 32]; 8];
+            let mut g_d2 = vec![vec![zero_expr.clone(); 32]; 8];
+            let mut g_b2 = vec![vec![zero_expr.clone(); 32]; 8];
+            for g in 0..8 {
+                let g_base = B3_LAST_ROUND_START + g * G_SIZE;
+                for bit in 0..32 {
+                    g_d1[g][bit] = cur[g_base + G_D1_OFFSET + bit].into();
+                    g_b1[g][bit] = cur[g_base + G_B1_OFFSET + bit].into();
+                    g_d2[g][bit] = cur[g_base + G_D2_OFFSET + bit].into();
+                    g_b2[g][bit] = cur[g_base + G_B2_OFFSET + bit].into();
+                }
+            }
+            (alpha_bits, g_d1, g_b1, g_d2, g_b2, alpha_field)
+        };
+
+        // C_G: alpha_bits[32*i + b] == (d1 ^ (d2 <<< 8))[b] ^ (b1 ^ (b2 <<< 7))[b]
+        for i in 0..4 {
+            let g_a = LAST_G_FOR_A[i];
+            let g_c = LAST_G_FOR_C[i];
+            for bit in 0..32 {
+                let va_bit = g_d1[g_a][bit].clone() + g_d2[g_a][(bit + 24) % 32].clone();
+                let vc_bit = g_b1[g_c][bit].clone() + g_b2[g_c][(bit + 25) % 32].clone();
+                let expected = va_bit + vc_bit;
+                let alpha_bit = &alpha_bits[32 * i + bit];
+                b.assert_eq(is_first.clone() * (alpha_bit.clone() + expected), zero);
+            }
+        }
+
+        // C_J: alpha field == sum(alpha_bits[j] * X_j)
+        let mut recon: AB::Expr = zero.into();
+        for j in 0..128 {
+            let x_j_f: AB::F = AB::F::from_le_bytes((1u128 << j).to_le_bytes());
+            let x_j: AB::Expr = x_j_f.into();
+            recon = recon + alpha_bits[j].clone() * x_j;
+        }
+        b.assert_eq(is_first * (recon + alpha_field), zero);
+    }
+}
+
+#[cfg(test)]
+mod tests_phase4_alpha {
+    use super::*;
+    use p3_air::check_constraints;
+    use p3_blake3_air::{Blake3CompressionInput, generate_binary_trace_rows};
+    use p3_blake3_air::{Blake3BinaryCols, NUM_BLAKE3_BINARY_COLS};
+    use p3_field::PrimeCharacteristicRing;
+    use p3_matrix::dense::RowMajorMatrix;
+    use p3_matrix::Matrix;
+    use core::borrow::Borrow;
+
+    type F = BinaryField128;
+
+    fn build_phase4_trace(h0: F, h_inf: F) -> RowMajorMatrix<F> {
+        let h0_bytes: [u8; 16] = unsafe { core::mem::transmute_copy(&h0) };
+        let h_inf_bytes: [u8; 16] = unsafe { core::mem::transmute_copy(&h_inf) };
+        let h0_u128: u128 = unsafe { core::mem::transmute_copy(&h0) };
+        let hinf_u128: u128 = unsafe { core::mem::transmute_copy(&h_inf) };
+
+        let mut block = [0u32; 16];
+        for i in 0..10 {
+            block[i / 4] |= (ROUND_POLY_CONST[i] as u32) << ((i % 4) * 8);
+        }
+        for i in 0..16 {
+            let p = 10 + i;
+            block[p / 4] |= (h0_bytes[i] as u32) << ((p % 4) * 8);
+        }
+        for i in 0..16 {
+            let p = 26 + i;
+            block[p / 4] |= (h_inf_bytes[i] as u32) << ((p % 4) * 8);
+        }
+
+        let input = Blake3CompressionInput {
+            chaining_value: IV_U32,
+            block,
+            counter: 0,
+            block_len: BLOCK_LEN_CONST,
+            flags: FLAGS_CONST,
+        };
+
+        let base = generate_binary_trace_rows::<F>(vec![input], 0);
+        let num_rows = base.height();
+
+        // Extract reference alpha from compression_output() on row 0
+        let cols_slice = &base.values[0..NUM_BLAKE3_BINARY_COLS];
+        let cols: &Blake3BinaryCols<F> = cols_slice.borrow();
+        let output = cols.compression_output();
+        let mut alpha_u128: u128 = 0;
+        for i in 0..4 {
+            alpha_u128 |= (output[i] as u128) << (32 * i);
+        }
+        let alpha_field = F::from_le_bytes(alpha_u128.to_le_bytes());
+
+        let mut values = vec![F::ZERO; num_rows * WIDTH_WITH_ALPHA];
+        for r in 0..num_rows {
+            for c in 0..BLAKE3_TRACE_COLS {
+                values[r * WIDTH_WITH_ALPHA + c] = base.values[r * BLAKE3_TRACE_COLS + c];
+            }
+            if r == 0 {
+                values[r * WIDTH_WITH_ALPHA + COL_H0] = h0;
+                values[r * WIDTH_WITH_ALPHA + COL_H_INF] = h_inf;
+                values[r * WIDTH_WITH_ALPHA + COL_ALPHA] = alpha_field;
+                for i in 0..128 {
+                    if (h0_u128 >> i) & 1 == 1 {
+                        values[r * WIDTH_WITH_ALPHA + COL_H0_BITS_BASE + i] = F::ONE;
+                    }
+                    if (hinf_u128 >> i) & 1 == 1 {
+                        values[r * WIDTH_WITH_ALPHA + COL_HINF_BITS_BASE + i] = F::ONE;
+                    }
+                    if (alpha_u128 >> i) & 1 == 1 {
+                        values[r * WIDTH_WITH_ALPHA + COL_ALPHA_BITS_BASE + i] = F::ONE;
+                    }
+                }
+            }
+            if r == num_rows - 1 {
+                values[r * WIDTH_WITH_ALPHA + COL_IS_LAST] = F::ONE;
+            }
+        }
+        RowMajorMatrix::new(values, WIDTH_WITH_ALPHA)
+    }
+
+    fn test_h0() -> F { F::from_le_bytes(0x0123456789ABCDEF_FEDCBA9876543210u128.to_le_bytes()) }
+    fn test_hinf() -> F { F::from_le_bytes(0xFEDCBA9876543210_0123456789ABCDEFu128.to_le_bytes()) }
+
+    fn expect_reject<F2: FnOnce()>(f: F2, msg: &str) {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        assert!(r.is_err(), "{}", msg);
+    }
+
+    #[test]
+    fn layout_phase4() {
+        assert_eq!(COL_ALPHA_BITS_BASE, WIDTH_WITH_BITS);
+        assert_eq!(WIDTH_WITH_ALPHA, WIDTH_WITH_BITS + 128);
+    }
+
+    #[test]
+    fn full_valid_alpha_passes() {
+        let trace = build_phase4_trace(test_h0(), test_hinf());
+        check_constraints(&Blake3TranscriptAirWithAlpha, &trace, &[]);
+        println!("PASS: alpha = Blake3 compression output");
+    }
+
+    #[test]
+    fn tampered_alpha_field_rejected() {
+        let mut trace = build_phase4_trace(test_h0(), test_hinf());
+        trace.values[COL_ALPHA] = trace.values[COL_ALPHA] + F::ONE;
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAirWithAlpha, &trace, &[]),
+            "tampered alpha field must fail C_J",
+        );
+        println!("PASS: tampered alpha field rejected");
+    }
+
+    #[test]
+    fn tampered_alpha_bit_rejected() {
+        let mut trace = build_phase4_trace(test_h0(), test_hinf());
+        let idx = COL_ALPHA_BITS_BASE + 10;
+        trace.values[idx] = if trace.values[idx] == F::ONE { F::ZERO } else { F::ONE };
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAirWithAlpha, &trace, &[]),
+            "tampered alpha_bit must fail C_G or C_J",
+        );
+        println!("PASS: tampered alpha_bit rejected");
+    }
+
+    #[test]
+    fn tampered_g_column_rejected() {
+        let mut trace = build_phase4_trace(test_h0(), test_hinf());
+        let g_a = LAST_G_FOR_A[0];
+        let g_base = B3_LAST_ROUND_START + g_a * G_SIZE;
+        let col = g_base + G_D1_OFFSET + 0;
+        trace.values[col] = if trace.values[col] == F::ONE { F::ZERO } else { F::ONE };
+        expect_reject(
+            || check_constraints(&Blake3TranscriptAirWithAlpha, &trace, &[]),
+            "tampered G-column must fail C_G",
+        );
+        println!("PASS: tampered G-column rejected");
+    }
+}
