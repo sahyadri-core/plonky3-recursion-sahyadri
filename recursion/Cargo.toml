@@ -317,6 +317,10 @@ name = "t1_4c_s8_bridge_v2sc"
 path = "tests/t1_4c_s8_bridge_v2sc.rs"
 
 [[test]]
+name = "t1_4c_s8_merkle_path_2f"
+path = "tests/t1_4c_s8_merkle_path_2f.rs"
+
+[[test]]
 name = "t1_4c_iso_p2b"
 path = "tests/t1_4c_iso_p2b.rs"
 
