@@ -313,6 +313,10 @@ name = "t1_4c_s8_bridge_v2"
 path = "tests/t1_4c_s8_bridge_v2.rs"
 
 [[test]]
+name = "t1_4c_s8_bridge_v2sc"
+path = "tests/t1_4c_s8_bridge_v2sc.rs"
+
+[[test]]
 name = "t1_4c_iso_p2b"
 path = "tests/t1_4c_iso_p2b.rs"
 
