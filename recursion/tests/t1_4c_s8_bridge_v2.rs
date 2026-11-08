@@ -177,7 +177,7 @@ fn bridge_v2_import_and_prove() {
     println!("V2 PROVE OK {:?}", start.elapsed());
 
     // 2. Build verifier plan
-    let hash = ByteHash::Blake3;
+    let hash = ByteHash::Poseidon2b;  // matches Poseidon2b MMCS
     let v2_log_h = trace.height().trailing_zeros() as usize;
     let verifier = BinaryGroupedMultiStarkVerifier::<F, E>::new(
         &[&air],

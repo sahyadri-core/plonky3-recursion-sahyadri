@@ -243,7 +243,7 @@ fn bridge_v2sc_import_and_prove() {
     // Verifier
     let v2_log_h = v2_trace.height().trailing_zeros() as usize;
     let sc_log_h = sc_trace.height().trailing_zeros() as usize;
-    let hash = ByteHash::Blake3;
+    let hash = ByteHash::Poseidon2b;  // matches Poseidon2b MMCS
     let verifier = BinaryGroupedMultiStarkVerifier::<F, E>::new(
         &[&v2_air, &sc_air],
         &[v2_log_h, sc_log_h],

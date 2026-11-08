@@ -61,6 +61,15 @@ impl NpoTypeId {
         Self::new("blake3_compress")
     }
 
+    /// Poseidon2b byte hash — Phase 2b-2f A'2 bridge.
+    ///
+    /// Wraps `Poseidon2bFieldHash::hash_iter` semantics for circuit execution.
+    /// Multi-compression chaining (leaf + fold) is done inside the AIR
+    /// (`Poseidon2bByteHashAir`). Each circuit call produces one 32-byte digest.
+    pub fn poseidon2b_byte_hash() -> Self {
+        Self::new("poseidon2b_byte_hash")
+    }
+
     /// `Keccak-f[1600]` permutation over 16-bit limbs.
     pub fn keccak_f1600() -> Self {
         Self::new("keccak_f1600")

@@ -94,7 +94,9 @@ impl<F: BinaryCoordinateField> BinaryCircuitHost<F> for NativeBinaryEncoding {
         <Self as BinaryCircuitEncoding<F>>::check_carrier()?;
         match hash {
             ByteHash::Keccak256 => Ok(()),
-            ByteHash::Poseidon2b => todo!("Poseidon2b host check — Phase 2 wires in-circuit impl"),
+            ByteHash::Poseidon2b => Err(CircuitBuilderError::UnsupportedNonPrimitiveOp {
+                op: NpoTypeId::poseidon2b_byte_hash(),
+            }),
             ByteHash::Blake3 => Err(CircuitBuilderError::UnsupportedNonPrimitiveOp {
                 op: NpoTypeId::blake3_compress(),
             }),
