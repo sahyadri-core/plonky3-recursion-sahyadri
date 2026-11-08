@@ -13,6 +13,7 @@ pub mod binary_tower;
 pub mod blake3_compress;
 pub mod byte_hash;
 pub mod poseidon2b_byte_hash;
+pub mod poseidon2b_compress;
 pub mod hash;
 pub mod keccak_perm;
 pub mod mmcs;

@@ -619,37 +619,124 @@ where
 
     fn poseidon2b_limbs<BF>(
         &mut self,
-        _message: &[ExprId],
+        message: &[ExprId],
     ) -> Result<Vec<ExprId>, CircuitBuilderError>
     where
         BF: PrimeField64,
         F: ExtensionField<BF>,
     {
-        todo!("Poseidon2b byte hash limbs — Phase 2 in-circuit impl")
+        self.poseidon2b_packed_bytes::<BF>(message, 2 * message.len())
     }
 
     fn poseidon2b_packed_bytes<BF>(
         &mut self,
-        _limbs: &[ExprId],
-        _byte_len: usize,
+        message: &[ExprId],
+        _message_bytes: usize,
     ) -> Result<Vec<ExprId>, CircuitBuilderError>
     where
         BF: PrimeField64,
         F: ExtensionField<BF>,
     {
-        todo!("Poseidon2b byte hash packed bytes — Phase 2")
+        // 8 limbs = 1 field element (16 bytes)
+        const LIMBS_PER_FIELD: usize = 8;
+        let zero_limb = self.define_const(F::ZERO);
+        let field_count = (message.len() + LIMBS_PER_FIELD - 1) / LIMBS_PER_FIELD;
+
+        // Pad to multiple of LIMBS_PER_FIELD with zero limbs
+        let padded: Vec<ExprId> = (0..field_count * LIMBS_PER_FIELD)
+            .map(|i| message.get(i).copied().unwrap_or(zero_limb))
+            .collect();
+
+        // Split into fields (8 limbs each)
+        let fields: Vec<&[ExprId]> = padded.chunks(LIMBS_PER_FIELD).collect();
+        let zero_field: Vec<ExprId> = alloc::vec![zero_limb; LIMBS_PER_FIELD];
+
+        let (mut acc_d0, mut acc_d1) = if fields.is_empty() {
+            let d0 = self.add_poseidon2b_compress(&zero_field)?;
+            let d1 = self.add_poseidon2b_compress(&zero_field)?;
+            (d0, d1)
+        } else if fields.len() == 1 {
+            let f0 = fields[0];
+            let mut in0 = f0.to_vec();
+            in0.extend_from_slice(&zero_field);
+            let d0 = self.add_poseidon2b_compress(&in0)?;
+            let mut in1 = zero_field.clone();
+            in1.extend_from_slice(f0);
+            let d1 = self.add_poseidon2b_compress(&in1)?;
+            (d0, d1)
+        } else {
+            let f0 = fields[0];
+            let mut in0 = f0.to_vec();
+            in0.extend_from_slice(&zero_field);
+            let d0 = self.add_poseidon2b_compress(&in0)?;
+            let mut in1 = zero_field.clone();
+            in1.extend_from_slice(f0);
+            let d1 = self.add_poseidon2b_compress(&in1)?;
+            (d0, d1)
+        };
+
+        if fields.len() > 1 {
+            let mut i = 1;
+            while i + 1 < fields.len() {
+                let mut in_d0 = acc_d0.clone();
+                in_d0.extend_from_slice(fields[i]);
+                acc_d0 = self.add_poseidon2b_compress(&in_d0)?;
+
+                let mut in_d1 = acc_d1.clone();
+                in_d1.extend_from_slice(fields[i + 1]);
+                acc_d1 = self.add_poseidon2b_compress(&in_d1)?;
+                i += 2;
+            }
+            if i < fields.len() {
+                let mut in_d0 = acc_d0.clone();
+                in_d0.extend_from_slice(fields[i]);
+                acc_d0 = self.add_poseidon2b_compress(&in_d0)?;
+
+                let mut in_d1 = acc_d1.clone();
+                in_d1.extend_from_slice(&zero_field);
+                acc_d1 = self.add_poseidon2b_compress(&in_d1)?;
+            }
+        }
+
+        // Return 16 limbs (d0 8 limbs + d1 8 limbs)
+        let mut result = acc_d0;
+        result.extend_from_slice(&acc_d1);
+        Ok(result)
     }
 
     fn poseidon2b_compress_digests<BF>(
         &mut self,
-        _left: &[ExprId],
-        _right: &[ExprId],
+        left: &[ExprId],
+        right: &[ExprId],
     ) -> Result<Vec<ExprId>, CircuitBuilderError>
     where
         BF: PrimeField64,
         F: ExtensionField<BF>,
     {
-        todo!("Poseidon2b byte hash compress digests — Phase 2")
+        // Each digest is 16 limbs = 32 bytes = 2 fields (d0, d1)
+        const LIMBS_PER_FIELD: usize = 8;
+        const DIGEST_LIMBS: usize = 16;
+        for digest in [left, right] {
+            if digest.len() != DIGEST_LIMBS {
+                return Err(CircuitBuilderError::NonPrimitiveOpArity {
+                    op: "Poseidon2bCompress",
+                    expected: alloc::format!("{DIGEST_LIMBS} limbs per digest"),
+                    got: digest.len(),
+                });
+            }
+        }
+        // c0 = compress(left[0..8], right[0..8])
+        let mut in0 = left[..LIMBS_PER_FIELD].to_vec();
+        in0.extend_from_slice(&right[..LIMBS_PER_FIELD]);
+        let c0 = self.add_poseidon2b_compress(&in0)?;
+        // c1 = compress(left[8..16], right[8..16])
+        let mut in1 = left[LIMBS_PER_FIELD..].to_vec();
+        in1.extend_from_slice(&right[LIMBS_PER_FIELD..]);
+        let c1 = self.add_poseidon2b_compress(&in1)?;
+
+        let mut result = c0;
+        result.extend_from_slice(&c1);
+        Ok(result)
     }
 }
 

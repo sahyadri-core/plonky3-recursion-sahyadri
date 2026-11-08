@@ -61,6 +61,13 @@ impl NpoTypeId {
         Self::new("blake3_compress")
     }
 
+    /// Poseidon2b field compression (2 fields → 1 field).
+    ///
+    /// Byte hash is chained at circuit-builder level via multiple calls.
+    pub fn poseidon2b_compress() -> Self {
+        Self::new("poseidon2b_compress")
+    }
+
     /// Poseidon2b byte hash — Phase 2b-2f A'2 bridge.
     ///
     /// Wraps `Poseidon2bFieldHash::hash_iter` semantics for circuit execution.
