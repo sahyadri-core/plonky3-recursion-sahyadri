@@ -1,6 +1,7 @@
 pub mod alu_air;
 mod alu_columns;
 pub mod blake3_air;
+pub mod poseidon2b_byte_hash_air;
 mod column_layout;
 pub mod const_air;
 pub mod keccak_air;
@@ -16,6 +17,7 @@ pub mod test_utils;
 
 pub use alu_air::{AluAir, AluExtMulKind};
 pub use blake3_air::Blake3CompressAir;
+pub use poseidon2b_byte_hash_air::Poseidon2bByteHashAir;
 pub use const_air::ConstAir;
 pub use keccak_air::KeccakF1600Air;
 pub use public_air::{PublicAir, WitnessSendAir};

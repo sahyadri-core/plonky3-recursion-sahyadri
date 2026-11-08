@@ -41,6 +41,7 @@ tracing.workspace = true
 unroll.workspace = true
 
 [dev-dependencies]
+sahyadri-fri-binius = { path = "../../sahyadri-final/sahyadri/crates/sahyadri-fri-binius" }
 criterion = { version = "0.8", features = ["html_reports"] }
 p3-air.workspace = true
 p3-baby-bear.workspace = true
