@@ -10,6 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+p3-poseidon2b = { workspace = true }
 
 # Other common dependencies
 hashbrown.workspace = true
