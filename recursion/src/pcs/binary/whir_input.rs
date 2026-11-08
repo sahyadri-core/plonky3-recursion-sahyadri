@@ -123,6 +123,7 @@ impl<F: RecursiveBinaryWhirTowerField> BinaryWhirInputShape<F> {
         w.write_u8(match self.hash {
             ByteHash::Keccak256 => 0,
             ByteHash::Blake3 => 1,
+            ByteHash::Poseidon2b => 2,
         })?;
         w.write_count("binary WHIR cap height", self.cap_height)?;
         let shapes = self.protocol.table_shapes();

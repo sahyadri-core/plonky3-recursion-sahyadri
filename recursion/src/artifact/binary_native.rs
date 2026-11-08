@@ -258,6 +258,7 @@ fn write_hash(w: &mut Writer, hash: ByteHash) -> Result<(), ArtifactError> {
     w.write_u8(match hash {
         ByteHash::Keccak256 => 1,
         ByteHash::Blake3 => 2,
+        ByteHash::Poseidon2b => 3,
     })
 }
 fn write_pcs(w: &mut Writer, pcs: BinaryNativePcsParameters) -> Result<(), ArtifactError> {

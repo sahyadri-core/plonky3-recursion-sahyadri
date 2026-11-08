@@ -26,6 +26,14 @@ pub enum ByteHash {
     Keccak256,
     /// BLAKE3 (`p3_blake3::Blake3`), over the BLAKE3 compression operation.
     Blake3,
+    /// Poseidon2b byte hash, matching `MerkleTreeMmcs<F, u8, Poseidon2bFieldHash,
+    /// Poseidon2bFieldCompress, 2, 32>` semantics.
+    ///
+    /// # Status (Phase 1, WIP)
+    /// Enum variant added for A'2 bridge. In-circuit implementation lands Phase 2.
+    /// Currently returns `CircuitBuilderError::UnsupportedNonPrimitiveOp` for all
+    /// operations. Used by `import_native` on Poseidon2b MMCS proofs.
+    Poseidon2b,
 }
 
 impl<F> crate::CircuitBuilder<F>
@@ -110,6 +118,7 @@ where
         match hash {
             ByteHash::Keccak256 => self.keccak256_limbs::<BF>(message),
             ByteHash::Blake3 => self.blake3_limbs::<BF>(message),
+            ByteHash::Poseidon2b => self.poseidon2b_limbs::<BF>(message),
         }
     }
 
@@ -144,6 +153,7 @@ where
         match hash {
             ByteHash::Keccak256 => self.keccak256_packed_bytes::<BF>(&limbs, message.len()),
             ByteHash::Blake3 => self.blake3_packed_bytes(&limbs, message.len()),
+            ByteHash::Poseidon2b => self.poseidon2b_packed_bytes::<BF>(&limbs, message.len()),
         }
     }
 
@@ -185,6 +195,7 @@ where
         match hash {
             ByteHash::Keccak256 => self.keccak256_compress(left, right),
             ByteHash::Blake3 => self.blake3_compress_digests::<BF>(left, right),
+            ByteHash::Poseidon2b => self.poseidon2b_compress_digests::<BF>(left, right),
         }
     }
 
@@ -596,7 +607,52 @@ where
     {
         self.verify_byte_hash_merkle_path::<BF>(ByteHash::Blake3, leaf, index_bits, siblings, root)
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Poseidon2b byte hash — Phase 1 stubs (Phase 2 implements in-circuit)
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // The in-circuit Poseidon2b byte hash must replicate
+    // `sahyadri_fri_binius::poseidon2b_hasher::Poseidon2bFieldHash::hash_iter`
+    // and `Poseidon2bFieldCompress::compress` semantics exactly. Each byte-digest
+    // requires multiple Poseidon2b permutations — Phase 2 is 3-5 days.
+
+    fn poseidon2b_limbs<BF>(
+        &mut self,
+        _message: &[ExprId],
+    ) -> Result<Vec<ExprId>, CircuitBuilderError>
+    where
+        BF: PrimeField64,
+        F: ExtensionField<BF>,
+    {
+        todo!("Poseidon2b byte hash limbs — Phase 2 in-circuit impl")
+    }
+
+    fn poseidon2b_packed_bytes<BF>(
+        &mut self,
+        _limbs: &[ExprId],
+        _byte_len: usize,
+    ) -> Result<Vec<ExprId>, CircuitBuilderError>
+    where
+        BF: PrimeField64,
+        F: ExtensionField<BF>,
+    {
+        todo!("Poseidon2b byte hash packed bytes — Phase 2")
+    }
+
+    fn poseidon2b_compress_digests<BF>(
+        &mut self,
+        _left: &[ExprId],
+        _right: &[ExprId],
+    ) -> Result<Vec<ExprId>, CircuitBuilderError>
+    where
+        BF: PrimeField64,
+        F: ExtensionField<BF>,
+    {
+        todo!("Poseidon2b byte hash compress digests — Phase 2")
+    }
 }
+
 
 #[cfg(test)]
 mod tests {

@@ -46,6 +46,7 @@ impl CryptographicHasher<u8, [u8; 32]> for BinaryNativeHash {
         match self.0 {
             ByteHash::Keccak256 => p3_keccak::Keccak256Hash.hash_iter(input),
             ByteHash::Blake3 => p3_blake3::Blake3.hash_iter(input),
+            ByteHash::Poseidon2b => todo!("Poseidon2b byte hash native — Phase 2"),
         }
     }
 
@@ -56,6 +57,7 @@ impl CryptographicHasher<u8, [u8; 32]> for BinaryNativeHash {
         match self.0 {
             ByteHash::Keccak256 => p3_keccak::Keccak256Hash.hash_iter_slices(input),
             ByteHash::Blake3 => p3_blake3::Blake3.hash_iter_slices(input),
+            ByteHash::Poseidon2b => todo!("Poseidon2b byte hash slices — Phase 2"),
         }
     }
 
@@ -63,6 +65,7 @@ impl CryptographicHasher<u8, [u8; 32]> for BinaryNativeHash {
         match self.0 {
             ByteHash::Keccak256 => p3_keccak::Keccak256Hash.hash_many(input, out),
             ByteHash::Blake3 => p3_blake3::Blake3.hash_many(input, out),
+            ByteHash::Poseidon2b => todo!("Poseidon2b byte hash many — Phase 2"),
         }
     }
 }
