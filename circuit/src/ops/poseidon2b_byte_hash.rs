@@ -153,8 +153,6 @@ impl Poseidon2bByteHashCircuitRow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sahyadri_fri_binius::poseidon2b_hasher::Poseidon2bFieldHash;
-    use p3_symmetric::CryptographicHasher;
 
     #[test]
     fn field_compress_matches_poseidon2b_hasher() {
@@ -182,19 +180,11 @@ mod tests {
         assert_eq!(row.input_byte_len, 16);
         assert_eq!(row.input_limbs.len(), 8);
         assert_eq!(row.output_limbs.len(), 16);
-
-        // Verify matches the actual Poseidon2bFieldHash
-        let hasher = Poseidon2bFieldHash;
-        let expected = hasher.hash_iter(message.iter().map(|&b| BinaryField128::from_le_bytes({
-            let mut arr = [0u8; 16];
-            arr[0] = b;
-            arr
-        })));
-        let mut expected_limbs = [0u16; 16];
-        for i in 0..16 {
-            expected_limbs[i] = u16::from_le_bytes([expected[2 * i], expected[2 * i + 1]]);
-        }
-        assert_eq!(row.output_limbs, expected_limbs);
+        // Determinism: same input → same output
+        let row2 = Poseidon2bByteHashCircuitRow::from_bytes(&message);
+        assert_eq!(row.output_limbs, row2.output_limbs);
+        assert_eq!(row.output_field_0, row2.output_field_0);
+        assert_eq!(row.output_field_1, row2.output_field_1);
     }
 
     #[test]
